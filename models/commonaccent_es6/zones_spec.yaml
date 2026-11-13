@@ -35,18 +35,18 @@ zones:
       - CO-COR # Córdoba
       - CO-CES # Cesar
       - CO-SAP # San Andrés y Providencia
-      - MX-VER # Veracruz      (Gulf coast)
-      - MX-TAB # Tabasco       (Gulf coast)
-      - MX-CAM # Campeche      (debatable: Yucatán peninsula Spanish is often treated as its own variety)
-      - MX-YUC # Yucatán       (debatable, as above)
+      - MX-VER # Veracruz      (Gulf coast dialect: Caribbean-like, e.g. weakened final s)
+      - MX-TAB # Tabasco       (Gulf coast dialect)
       - MX-ROO # Quintana Roo  (Mexican Caribbean)
+      # Not here, on purpose (DECISIONS.md): Campeche and Yucatán (Yucatán-peninsula Spanish keeps
+      # final s and lacks Caribbean features) and Tamaulipas (northern Mexican). They stay in mexico.
   rioplatense:       # "RIOPLATENSE ARGENTINA URUGUAY ESTE DE BOLIVIA PARAGUAY"
-    countries: [ARG, URY, PRY]
+    countries: [ARG, URY, PRY]   # all of Argentina except Cuyo, incl. the Andean-leaning NW (label says "Argentina")
     codes:
       - BO-S   # Santa Cruz    (eastern Bolivia)
       - BO-B   # El Beni
       - BO-N   # Pando
-      - BO-T   # Tarija        (debatable: southern, often grouped with NW Argentina)
+      - BO-T   # Tarija        (southern; its Spanish leans to NW Argentina, which is rioplatense too)
   chilean:           # "CHILENO CHILE CUYO"
     countries: [CHL]
     codes:

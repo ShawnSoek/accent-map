@@ -13,9 +13,9 @@ The model is [`Jzuluaga/accent-id-commonaccent_xlsr-es-spanish`](https://hugging
 | Zone | Covers |
 |---|---|
 | Southern Spain | Andalusia, Extremadura, Murcia (**not** Madrid or northern Spain) |
-| Mexico | Mexico except the Gulf and Caribbean coast |
+| Mexico | Mexico except Veracruz, Tabasco and Quintana Roo |
 | Andean-Pacific | Colombia, Peru, Ecuador, western Bolivia, Andean Venezuela |
-| Caribbean | Cuba, Puerto Rico, Dominican Republic, Venezuela, Panama, Caribbean Colombia, Mexico's Gulf/Caribbean coast |
+| Caribbean | Cuba, Puerto Rico, Dominican Republic, Venezuela, Panama, Caribbean Colombia, Veracruz, Tabasco, Quintana Roo |
 | Rioplatense | Argentina, Uruguay, Paraguay, eastern Bolivia |
 | Chilean | Chile and Argentina's Cuyo region |
 

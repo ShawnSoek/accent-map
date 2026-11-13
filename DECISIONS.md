@@ -185,11 +185,15 @@ Short notes on each choice and why. Newest at the bottom.
 - **The zone table is `models/commonaccent_es6/zones_spec.yaml`, readable and commented.**
   - Regions are selected by ISO 3166-2 code, by Spanish autonomous community, or by whole country.
     The most specific rule wins. A typo, or a code listed twice, stops the build.
-  - Debatable choices, marked in the file:
-    - Campeche and Yucatán → Caribbean (Yucatec Spanish is often treated as its own variety).
-    - Tarija → Rioplatense, as "eastern Bolivia".
-    - Tamaulipas stays Mexico.
-    - North-western Argentina is Rioplatense, because the model's label says "Argentina".
+  - Debatable choices. Decided 2026-11-14 by reading each class as a description of how people
+    speak, at the user's request ("pick the most plausible"):
+    - Campeche and Yucatán → **Mexico** (changed from Caribbean). Yucatán-peninsula Spanish keeps
+      the final s and lacks Caribbean features. The label's "Gulf coast" dialect means Veracruz
+      and Tabasco. Quintana Roo stays Caribbean as the "Mexican Caribbean".
+    - Tarija → Rioplatense ("eastern Bolivia"). Its Spanish leans toward north-western Argentina,
+      which is Rioplatense too.
+    - Tamaulipas → Mexico: on the Gulf, but its Spanish is northern Mexican.
+    - North-western Argentina → Rioplatense, because the model's label says "Argentina".
 - **"Not covered" areas are drawn greyed out:** the rest of Spain and Central America except
   Panama. Everything else, such as Brazil, Haiti and the US, is plain land with no borders.
   The Canaries, Equatorial Guinea and the Philippines fall outside the map panels.

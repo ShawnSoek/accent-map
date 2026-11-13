@@ -65,7 +65,7 @@ classes:
   - id: mexico
     model_label: "MEXICO"
     label: "Mexico"
-    description: "Mexico, except the Gulf and Caribbean coasts (those count as Caribbean)."
+    description: "Mexico, except Veracruz, Tabasco and Quintana Roo (those count as Caribbean)."
     zone: mexico
   - id: andean_pacific
     model_label: "ANDINOPACIFICO COLOMBIA PERU ECUADOR OESTE DE BOLIVIA Y VENEZUELA ANDINA"
@@ -75,7 +75,7 @@ classes:
   - id: caribbean
     model_label: "CARIBE CUBA VENEZUELA PUERTO RICO REPUBLICA DOMINICANA PANAMA COLOMBIA CARIBENA MEXICO CARIBENO COSTA DEL GOLFO DE MEXICO"
     label: "Caribbean"
-    description: "Cuba, Puerto Rico, Dominican Republic, Venezuela, Panama, Caribbean Colombia, Mexico's Caribbean and Gulf coast."
+    description: "Cuba, Puerto Rico, Dominican Republic, Venezuela (except the Andes), Panama, Caribbean Colombia, Mexico's Gulf coast (Veracruz, Tabasco) and Caribbean coast (Quintana Roo)."
     zone: caribbean
   - id: rioplatense
     model_label: "RIOPLATENSE ARGENTINA URUGUAY ESTE DE BOLIVIA PARAGUAY"
