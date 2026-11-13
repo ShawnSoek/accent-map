@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Virtual environments (current and the renamed old one)
+.venv/
+.venv-*/
+
+# Downloads: model snapshots, Natural Earth, own recordings. Never committed.
+data/
+
+# Scratch dirs SpeechBrain/Hugging Face create in the working directory
+# when a load is misconfigured. Their presence means a bug; never commit them.
+wav2vec2_checkpoints/
+pretrained_models/
+
+# Credentials
+.env

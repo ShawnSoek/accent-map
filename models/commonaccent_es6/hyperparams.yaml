@@ -1,0 +1,92 @@
+# Local copy of hyperparams.yaml from
+#   Jzuluaga/accent-id-commonaccent_xlsr-es-spanish @ 0eff6f06bdbbcd75cafe3260c00a93985ca36d2d
+# Weights, label encoder and custom_interface.py still come from the pinned revision.
+# Two changes, both marked "CHANGED" below. See DECISIONS.md.
+#  1. wav2vec2 class path: SpeechBrain 1.x moved and renamed
+#     speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2 to
+#     speechbrain.integrations.huggingface.wav2vec2.Wav2Vec2 (same arguments).
+#  2. Added preout_mlp, the head the checkpoint was trained with. The published
+#     file leaves it out, so none of model.ckpt matched and the output layer stayed
+#     randomly initialised. custom_interface.py's classify_* also skips it, so our
+#     adapter runs encode_batch -> preout_mlp -> output_mlp -> softmax itself.
+# ############################################################################
+# Model: WAV2VEC XLSR model for Accent Recognition (Spanish)
+# see paper: https://arxiv.org/abs/2305.18283
+# ############################################################################
+
+# Hparams NEEDED
+HPARAMS_NEEDED: ["encoder_dim", "out_n_neurons", "label_encoder", "softmax"]
+# Modules Needed
+MODULES_NEEDED: ["wav2vec2", "avg_pool", "preout_mlp", "output_mlp"]  # CHANGED (2)
+
+# Feature parameters
+# wav2vec2_hub: facebook/wav2vec2-base
+wav2vec2_hub: "facebook/wav2vec2-large-xlsr-53"
+
+# Pretrain folder (HuggingFace)
+pretrained_path: Jzuluaga/accent-id-commonaccent_xlsr-es-spanish
+# URL for the biggest Fairseq english wav2vec2 model.
+
+# parameters
+encoder_dim: 1024
+out_n_neurons: 6
+
+# CHANGED (1): was speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2
+wav2vec2: !new:speechbrain.integrations.huggingface.wav2vec2.Wav2Vec2
+    source: !ref <wav2vec2_hub>
+    output_norm: True
+    freeze: True
+    save_path: wav2vec2_checkpoints
+
+# Mean and std normalization of the input features
+mean_var_norm_emb: !new:speechbrain.processing.features.InputNormalization
+    norm_type: sentence
+    std_norm: False
+
+avg_pool: !new:speechbrain.nnet.pooling.StatisticsPooling
+    return_std: False
+
+# CHANGED (2): added. Copied from the training config
+# JuanPZuluaga/accent-recog-slt2022 CommonAccent/accent_id/hparams/train_w2v2.yaml
+# (preout_mlp present from commit 63dd94ae70, 2023-02-22; GELU in every version).
+activation: !name:torch.nn.GELU
+dnn_layers: 2
+preout_mlp: !new:speechbrain.lobes.models.VanillaNN.VanillaNN
+    input_shape: [null, null, !ref <encoder_dim>]
+    activation: !ref <activation>
+    dnn_blocks: !ref <dnn_layers>
+    dnn_neurons: !ref <encoder_dim>
+
+output_mlp: !new:speechbrain.nnet.linear.Linear
+    input_size: !ref <encoder_dim>
+    n_neurons: !ref <out_n_neurons>
+    bias: False
+
+# CHANGED (2): was [!ref <output_mlp>]. Order must match model.ckpt keys "0.*" and "1.*".
+model: !new:torch.nn.ModuleList
+    - [!ref <preout_mlp>, !ref <output_mlp>]
+
+modules:
+    mean_var_norm_emb: !ref <mean_var_norm_emb>
+    wav2vec2: !ref <wav2vec2>
+    preout_mlp: !ref <preout_mlp>  # CHANGED (2): added
+    output_mlp: !ref <output_mlp>
+    avg_pool: !ref <avg_pool>
+
+softmax: !new:speechbrain.nnet.activations.Softmax
+        
+label_encoder: !new:speechbrain.dataio.encoder.CategoricalEncoder
+
+
+pretrainer: !new:speechbrain.utils.parameter_transfer.Pretrainer
+    loadables:
+        mean_var_norm_emb: !ref <mean_var_norm_emb>
+        wav2vec2: !ref <wav2vec2>
+        model: !ref <model>
+        label_encoder: !ref <label_encoder>
+    paths:
+        mean_var_norm_emb: !ref <pretrained_path>/normalizer_input.ckpt
+        wav2vec2: !ref <pretrained_path>/wav2vec2.ckpt
+        model: !ref <pretrained_path>/model.ckpt
+        label_encoder: !ref <pretrained_path>/label_encoder.txt
+

@@ -1,0 +1,78 @@
+# Stage-1 model. The app reads only this file; see src/server/config.py for the schema.
+name: commonaccent_es6
+display_name: "CommonAccent XLSR-53 · Spanish, 6 dialect zones"
+description: >-
+  Pretrained accent classifier (wav2vec2 XLSR-53 fine-tuned on Common Voice 11 Spanish).
+  Classes are dialect zones, not countries.
+
+source:
+  repo: Jzuluaga/accent-id-commonaccent_xlsr-es-spanish
+  revision: 0eff6f06bdbbcd75cafe3260c00a93985ca36d2d
+  license: MIT
+
+backend: speechbrain_custom_classifier
+backend_options:
+  # Local copy with two fixes; see the header of that file and DECISIONS.md.
+  hparams_file: hyperparams.yaml
+  # Taken unchanged from the pinned source revision.
+  pymodule_file: custom_interface.py
+  classname: CustomEncoderWav2vec2Classifier
+  label_encoder_file: label_encoder.txt
+  # Loaded with strict=True: hparams key -> checkpoint file in the source revision.
+  checkpoints:
+    wav2vec2: wav2vec2.ckpt
+    model: model.ckpt
+  # Applied after encode_batch, in this order, then hparams "softmax".
+  head: [preout_mlp, output_mlp]
+  # SpeechBrain's wav2vec2 wrapper builds the architecture from this base model.
+  base_model:
+    repo: facebook/wav2vec2-large-xlsr-53
+    revision: c3f9d884181a224a6ac87bf8885c84d1cff3384f
+    license: Apache-2.0
+    files: [config.json, preprocessor_config.json, pytorch_model.bin]
+  # hparams overrides; {source_dir} and {base_dir} become the local pinned snapshots.
+  overrides:
+    pretrained_path: "{source_dir}"
+    wav2vec2_hub: "{base_dir}"
+
+audio:
+  sample_rate: 16000
+  window_seconds: 5.0
+  hop_seconds: 0.5
+
+caveats:
+  - "Reported accuracy is 68.5% on Common Voice read speech. Expect less on your own recordings."
+  - "Speakers from outside these six zones (e.g. Madrid, northern Spain, Central America) are still assigned to one of them."
+
+# Order here is free: the adapter maps model outputs by model_label, read from the model files.
+classes:
+  - id: es_south
+    model_label: "ESPANA SUR PENINSULAR (ANDALUCIA EXTREMADURA MURCIA)"
+    label: "Southern Spain"
+    description: "Andalusia, Extremadura, Murcia. Madrid and northern Spain are not covered."
+    zone: es_south
+  - id: mexico
+    model_label: "MEXICO"
+    label: "Mexico"
+    description: "Mexico, except the Gulf and Caribbean coasts (those count as Caribbean)."
+    zone: mexico
+  - id: andean_pacific
+    model_label: "ANDINOPACIFICO COLOMBIA PERU ECUADOR OESTE DE BOLIVIA Y VENEZUELA ANDINA"
+    label: "Andean-Pacific"
+    description: "Inland Colombia, Peru, Ecuador, western Bolivia, Andean Venezuela."
+    zone: andean_pacific
+  - id: caribbean
+    model_label: "CARIBE CUBA VENEZUELA PUERTO RICO REPUBLICA DOMINICANA PANAMA COLOMBIA CARIBENA MEXICO CARIBENO COSTA DEL GOLFO DE MEXICO"
+    label: "Caribbean"
+    description: "Cuba, Puerto Rico, Dominican Republic, Venezuela, Panama, Caribbean Colombia, Mexico's Caribbean and Gulf coast."
+    zone: caribbean
+  - id: rioplatense
+    model_label: "RIOPLATENSE ARGENTINA URUGUAY ESTE DE BOLIVIA PARAGUAY"
+    label: "Rioplatense"
+    description: "Argentina, Uruguay, Paraguay, eastern Bolivia."
+    zone: rioplatense
+  - id: chilean
+    model_label: "CHILENO CHILE CUYO"
+    label: "Chilean"
+    description: "Chile and Argentina's Cuyo region (Mendoza, San Juan, San Luis)."
+    zone: chilean

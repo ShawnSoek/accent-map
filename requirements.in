@@ -1,0 +1,18 @@
+# Top-level runtime dependencies. requirements.txt is generated from this file,
+# never edited by hand:
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.12 --torch-backend cpu --emit-index-url
+#
+# CPU-only PyTorch: the dev machine has no NVIDIA GPU (see DECISIONS.md).
+torch==2.11.0
+torchaudio==2.11.0        # must match torch's minor version
+speechbrain==1.1.2        # version-sensitive; see DECISIONS.md before changing
+transformers==4.57.6      # last 4.x; SpeechBrain's HF wrapper targets 4.x
+huggingface_hub
+numpy
+soundfile
+soxr
+pyyaml
+pydantic
+fastapi
+uvicorn[standard]
+python-multipart

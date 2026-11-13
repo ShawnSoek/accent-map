@@ -1,0 +1,10 @@
+# Tool configuration only. Dependencies are pinned in requirements.txt.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+# Fast tests by default. Tests that need the downloaded model: pytest -m model
+addopts = "-ra -m 'not model'"
+markers = [
+    "model: needs the real downloaded model (slow, ~1 min to load)",
+]
