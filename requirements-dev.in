@@ -1,6 +1,6 @@
 # Test and build tools. requirements-dev.txt is generated from this file:
 #   uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.12 -c requirements.txt
 pytest
-httpx
+httpx2                    # FastAPI/Starlette TestClient
 websockets                # scripts/stream_wav.py
 shapely                   # scripts/build_zones.py, tests/test_zones.py

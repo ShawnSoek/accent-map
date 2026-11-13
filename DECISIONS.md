@@ -173,8 +173,8 @@ Short notes on each choice and why. Newest at the bottom.
   - Delay from audio sent to event received, with full 5 s windows: about 0.9 s (about 0.8 s of
     inference plus about 0.1 s while the resampler waits for the next chunk). The browser's own
     capture delay isn't included.
-- **Still `httpx` for the test client.** Starlette 1.10 recommends `httpx2`, but the swap was
-  blocked by a permission check. The only effect is a deprecation warning in the tests.
+- **The test client uses `httpx2`** (2026-11-14), as Starlette 1.10 recommends. `httpx` was
+  removed, which also removed its deprecation warning.
 
 ## 2026-11-13: Map zones (step 7)
 
