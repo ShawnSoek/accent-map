@@ -150,3 +150,28 @@ Short notes on each choice and why. Newest at the bottom.
   misleading: `caribe-cuba-colombia.wav` shows Mexico (0.69, `confident`) at 4 s and switches to
   Caribbean once the window is 5 s long. We're not tuning on 4 clips; this is a candidate for
   raising `listen_speech_seconds` if real use confirms it.
+
+## 2026-11-13: Server (step 6)
+
+- **FastAPI + uvicorn, one model, one inference thread.** All sessions share one model
+  instance, and inferences run one at a time on a single worker thread. That's enough for a
+  single-user demo; a second simultaneous user would wait their turn.
+- **Live protocol:** the browser sends mono float32 audio at its own sample rate after a JSON
+  `start` message, and the server resamples with the streaming soxr resampler. When the model is
+  busy, only the newest window is analyzed; skipped windows are counted in each event (`dropped`).
+- **File upload is decoded on the server** with soundfile (WAV, FLAC, OGG, MP3).
+  - Results come back as NDJSON, one event per line, as soon as each is ready.
+  - The file is fed through the session one update interval at a time, so memory stays flat
+    for long files.
+  - Limits: 100 MB and 15 min. Under 1 s of audio is rejected with 422. Unreadable formats such
+    as M4A get a 415 that says which formats work.
+- **Startup:** loading takes about 7 s, then timing one inference takes about 3 s, which picks
+  the update interval. `--update-seconds` skips the timing.
+- **Measured end to end** (`scripts/stream_wav.py`): the 4 sample clips were streamed at 48 kHz
+  in real time, in 100 ms chunks.
+  - No windows were skipped at the 1.0 s interval, and the results equal file mode.
+  - Delay from audio sent to event received, with full 5 s windows: about 0.9 s (about 0.8 s of
+    inference plus about 0.1 s while the resampler waits for the next chunk). The browser's own
+    capture delay isn't included.
+- **Still `httpx` for the test client.** Starlette 1.10 recommends `httpx2`, but the swap was
+  blocked by a permission check. The only effect is a deprecation warning in the tests.

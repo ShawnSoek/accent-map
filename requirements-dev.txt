@@ -38,3 +38,7 @@ typing-extensions==4.16.0
     # via
     #   -c requirements.txt
     #   anyio
+websockets==17.4
+    # via
+    #   -c requirements.txt
+    #   -r requirements-dev.in

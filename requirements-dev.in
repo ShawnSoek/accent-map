@@ -2,3 +2,4 @@
 #   uv pip compile requirements-dev.in -o requirements-dev.txt --python-version 3.12 -c requirements.txt
 pytest
 httpx
+websockets                # scripts/stream_wav.py
