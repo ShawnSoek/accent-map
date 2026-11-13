@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Accent Map</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Accent Map</h1>
+      <p id="model-name" class="muted">Loading model…</p>
+    </div>
+    <p id="update-info" class="muted small"></p>
+  </header>
+
+  <section class="controls" aria-label="Audio input">
+    <div class="control">
+      <button id="mic-button" type="button" class="primary" disabled>Start microphone</button>
+      <div class="level" title="Microphone level"><div id="level-fill"></div></div>
+    </div>
+    <div class="control">
+      <label class="file-button">
+        <input id="file-input" type="file" accept="audio/*,.wav,.flac,.ogg,.mp3" disabled>
+        <span>Analyze a file…</span>
+      </label>
+      <audio id="player" controls hidden></audio>
+    </div>
+  </section>
+
+  <p id="error" class="error" role="alert" hidden></p>
+
+  <section id="status" class="status idle" aria-live="polite">
+    <span id="status-badge" class="badge">Ready</span>
+    <span id="status-text">Loading…</span>
+  </section>
+
+  <main class="layout">
+    <section id="map-area" class="map-area" aria-label="Map of dialect zones">
+      <div id="map" class="map"></div>
+      <p class="legend small muted">
+        <span class="swatch zone"></span> Darker = more likely
+        <span class="swatch uncovered"></span> Spanish-speaking, not covered by this model
+        <span class="swatch land"></span> Other land
+      </p>
+    </section>
+    <aside class="side">
+      <h2>Most likely</h2>
+      <ol id="top-list" class="top-list"></ol>
+      <h2>All zones</h2>
+      <ul id="all-list" class="all-list"></ul>
+    </aside>
+  </main>
+
+  <footer>
+    <ul id="caveats" class="caveats"></ul>
+    <p id="details" class="muted small"></p>
+    <p id="attribution" class="muted small"></p>
+  </footer>
+
+  <div id="tooltip" class="tooltip" hidden><strong></strong><span></span></div>
+
+  <script src="logic.js"></script>
+  <script src="map.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -208,3 +208,29 @@ Short notes on each choice and why. Newest at the bottom.
   - 44 cities land in the intended zone (e.g. Port-au-Prince is plain land, Santo Domingo is
     Caribbean, Mendoza is Chilean, Tarija is Rioplatense, Mérida (Venezuela) is Andean while
     Caracas is Caribbean)
+
+## 2026-11-14: Web page (step 8)
+
+- **Plain HTML, CSS and classic scripts.** No build step, no CDN, so the page works offline. The
+  server serves `web/` at `/`, and the API routes take precedence.
+- **Split for testing:**
+  - `logic.js` holds the pure functions: projection, path building, zone probabilities, opacity,
+    timeline lookup, NDJSON parsing and status text. pytest runs it in QuickJS, a small JS
+    engine added as a dev-only dependency.
+  - `map.js` is tested against a tiny fake DOM with the real zones.
+  - Every script gets a syntax check, and a test confirms every element id that `app.js` uses
+    exists in `index.html`.
+  - The browser wiring in `app.js` (microphone, playback, tooltips) can only be checked by hand.
+- **Smoothing stays on the server.** The browser only fades colours: the CSS transition lasts
+  90 % of the update interval, so the map moves continuously without flickering.
+- **Colour: one hue for every zone, whatever the class count.** Opacity is
+  `0.04 + 0.96·p^0.75`. Each zone has an opaque base under its coloured overlay, so an unlikely
+  zone still looks like land rather than sea.
+  - While `listening`, the map is dimmed to 45 % and the top-3 list is faded. While `no_speech`,
+    the map shows the last result at 60 %.
+- **Microphone:** echo cancellation, noise suppression and auto gain are switched off, so the
+  model hears the raw voice. An AudioWorklet sends 100 ms mono chunks at the browser's own sample
+  rate. Chunks are queued until the server is ready (at most 5 s).
+- **File mode:** the browser plays the file locally while the server analyzes it, and the page
+  shows the newest event at or before the playback position. Seeking works the same way. If
+  analysis falls behind playback, the page says so.

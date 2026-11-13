@@ -4,3 +4,4 @@ pytest
 httpx2                    # FastAPI/Starlette TestClient
 websockets                # scripts/stream_wav.py
 shapely                   # scripts/build_zones.py, tests/test_zones.py
+quickjs                   # tests/test_web.py runs web/logic.js

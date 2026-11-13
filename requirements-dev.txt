@@ -33,6 +33,8 @@ pygments==2.21.0
     # via pytest
 pytest==9.2.0
     # via -r requirements-dev.in
+quickjs==1.19.4
+    # via -r requirements-dev.in
 shapely==2.2.0
     # via -r requirements-dev.in
 truststore==0.10.5
