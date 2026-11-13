@@ -1,0 +1,70 @@
+# How Natural Earth admin-1 regions are merged into this model's map zones.
+# Input: data/naturalearth/ne_10m_admin_1_states_provinces.geojson (Natural Earth v5.1.2, public domain).
+# Build: python scripts/build_zones.py models/commonaccent_es6   ->  zones.geojson (committed)
+#
+# Each admin-1 region goes to exactly one group. Most specific rule wins:
+#   codes (ISO 3166-2, e.g. MX-VER)  >  communities (Spain's autonomous communities)  >  countries (ISO alpha-3)
+# Regions not matched by any rule are drawn as plain land (no accent information).
+# The zones are approximations of dialect areas, built from administrative regions. They are not borders.
+
+zones:
+  es_south:          # "ESPANA SUR PENINSULAR (ANDALUCIA EXTREMADURA MURCIA)"
+    communities: [Andalucía, Extremadura, Murcia]
+  mexico:            # "MEXICO" (Gulf and Caribbean coast states go to caribbean below)
+    countries: [MEX]
+  andean_pacific:    # "ANDINOPACIFICO COLOMBIA PERU ECUADOR OESTE DE BOLIVIA Y VENEZUELA ANDINA"
+    countries: [COL, PER, ECU]
+    codes:
+      - BO-L   # La Paz        (western Bolivia)
+      - BO-O   # Oruro
+      - BO-P   # Potosí
+      - BO-C   # Cochabamba
+      - BO-H   # Chuquisaca
+      - VE-L   # Mérida        (Andean Venezuela)
+      - VE-S   # Táchira
+      - VE-T   # Trujillo
+  caribbean:         # "CARIBE CUBA VENEZUELA PUERTO RICO REPUBLICA DOMINICANA PANAMA COLOMBIA CARIBENA
+                     #  MEXICO CARIBENO COSTA DEL GOLFO DE MEXICO"
+    countries: [CUB, PRI, DOM, PAN, VEN]
+    codes:
+      - CO-LAG # La Guajira    (Caribbean Colombia)
+      - CO-MAG # Magdalena
+      - CO-ATL # Atlántico
+      - CO-BOL # Bolívar
+      - CO-SUC # Sucre
+      - CO-COR # Córdoba
+      - CO-CES # Cesar
+      - CO-SAP # San Andrés y Providencia
+      - MX-VER # Veracruz      (Gulf coast)
+      - MX-TAB # Tabasco       (Gulf coast)
+      - MX-CAM # Campeche      (debatable: Yucatán peninsula Spanish is often treated as its own variety)
+      - MX-YUC # Yucatán       (debatable, as above)
+      - MX-ROO # Quintana Roo  (Mexican Caribbean)
+  rioplatense:       # "RIOPLATENSE ARGENTINA URUGUAY ESTE DE BOLIVIA PARAGUAY"
+    countries: [ARG, URY, PRY]
+    codes:
+      - BO-S   # Santa Cruz    (eastern Bolivia)
+      - BO-B   # El Beni
+      - BO-N   # Pando
+      - BO-T   # Tarija        (debatable: southern, often grouped with NW Argentina)
+  chilean:           # "CHILENO CHILE CUYO"
+    countries: [CHL]
+    codes:
+      - AR-M   # Mendoza       (Cuyo)
+      - AR-J   # San Juan
+      - AR-D   # San Luis
+
+# Spanish-speaking areas this model has no class for. Drawn greyed out as "not covered".
+uncovered:
+  spain_other:
+    label: "Rest of Spain (not covered)"
+    countries: [ESP]
+  central_america:
+    label: "Central America (not covered)"
+    countries: [GTM, HND, SLV, NIC, CRI]
+
+# Build settings per map panel (panel ids and boxes are in config.yaml).
+# tolerance: simplification in degrees; min_area: drop islands smaller than this (square degrees).
+build:
+  americas: {tolerance: 0.04, min_area: 0.02}
+  spain:    {tolerance: 0.015, min_area: 0.005}

@@ -3,3 +3,4 @@
 pytest
 httpx
 websockets                # scripts/stream_wav.py
+shapely                   # scripts/build_zones.py, tests/test_zones.py

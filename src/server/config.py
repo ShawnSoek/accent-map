@@ -48,8 +48,32 @@ class ClassInfo(_Strict):
     zone: str = Field(pattern=SLUG)
 
 
+class Panel(_Strict):
+    """One map panel: a lon/lat box drawn side by side with the others."""
+    id: str = Field(pattern=SLUG)
+    title: str = ""
+    bbox: tuple[float, float, float, float] = Field(description="west, south, east, north (degrees)")
+
+    @model_validator(mode="after")
+    def _box_is_sane(self) -> Panel:
+        w, s, e, n = self.bbox
+        if not (-180 <= w < e <= 180 and -90 <= s < n <= 90):
+            raise ValueError(f"panel {self.id}: bbox must be west < east, south < north, in degrees")
+        return self
+
+
 class MapSpec(_Strict):
-    zones_file: str | None = None
+    zones_file: str | None = None   # GeoJSON next to config.yaml (see scripts/build_zones.py)
+    panels: list[Panel] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _panels_if_zones(self) -> MapSpec:
+        if self.zones_file and not self.panels:
+            raise ValueError("map.zones_file needs at least one panel")
+        ids = [p.id for p in self.panels]
+        if len(set(ids)) != len(ids):
+            raise ValueError(f"duplicate panel ids: {ids}")
+        return self
 
 
 class ModelConfig(_Strict):

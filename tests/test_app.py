@@ -58,6 +58,25 @@ def test_model_info_follows_the_config(n_classes):
     assert info["audio"]["window_seconds"] == 5.0
 
 
+def test_zones_endpoint_serves_the_models_geojson(tmp_path):
+    raw = fake_config(3).model_dump(exclude={"model_dir"})
+    raw["map"] = {"zones_file": "zones.geojson", "panels": [{"id": "p", "title": "P", "bbox": [0, 0, 10, 10]}]}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(raw))
+    (tmp_path / "zones.geojson").write_text('{"type": "FeatureCollection", "features": []}')
+    client = TestClient(create_app(engine=Engine(model=load_model(tmp_path), settings=SessionSettings())))
+    assert client.get("/api/model").json()["map"] == {
+        "zones_url": "/api/zones", "panels": [{"id": "p", "title": "P", "bbox": [0, 0, 10, 10]}]}
+    r = client.get("/api/zones")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/geo+json")
+    assert r.json()["type"] == "FeatureCollection"
+
+
+def test_model_without_zones():
+    client, _ = make_client()
+    assert client.get("/api/model").json()["map"] == {"zones_url": None, "panels": []}
+    assert client.get("/api/zones").status_code == 404
+
+
 # --- POST /api/analyze ---------------------------------------------------------------
 
 def test_upload_streams_events_in_time_order():

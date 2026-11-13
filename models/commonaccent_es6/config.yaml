@@ -44,6 +44,17 @@ caveats:
   - "Reported accuracy is 68.5% on Common Voice read speech. Expect less on your own recordings."
   - "Speakers from outside these six zones (e.g. Madrid, northern Spain, Central America) are still assigned to one of them."
 
+# Zones are built from Natural Earth by scripts/build_zones.py using zones_spec.yaml.
+map:
+  zones_file: zones.geojson
+  panels:
+    - id: americas
+      title: "Americas"
+      bbox: [-118.0, -56.5, -34.0, 33.5]   # west, south, east, north
+    - id: spain
+      title: "Spain"
+      bbox: [-10.0, 35.0, 4.6, 44.2]
+
 # Order here is free: the adapter maps model outputs by model_label, read from the model files.
 classes:
   - id: es_south

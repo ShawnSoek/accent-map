@@ -1,6 +1,7 @@
 """HTTP and WebSocket server.
 
-  GET  /api/model    model info for the page: classes, zones, caveats, update interval
+  GET  /api/model    model info for the page: classes, map panels, caveats, update interval
+  GET  /api/zones    the model's map zones (GeoJSON), if it has any
   WS   /ws/live      live microphone audio in, events out (protocol below)
   POST /api/analyze  upload an audio file, events out as NDJSON (one JSON object per line)
   GET  /             the web page (web/), once it exists
@@ -31,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.audio import StreamingResampler, decode_file
@@ -194,7 +195,18 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
             "session": {k: getattr(s, k) for k in (
                 "min_audio_seconds", "listen_speech_seconds", "tau_seconds",
                 "confident_prob", "confident_margin", "top_k")},
+            "map": {
+                "zones_url": "/api/zones" if c.map.zones_file else None,
+                "panels": [p.model_dump() for p in c.map.panels],
+            },
         }
+
+    @app.get("/api/zones")
+    def zones() -> FileResponse:
+        c = app.state.engine.model.config
+        if not c.map.zones_file:
+            raise HTTPException(404, "This model has no map zones.")
+        return FileResponse(c.model_dir / c.map.zones_file, media_type="application/geo+json")
 
     @app.post("/api/analyze")
     async def analyze_file(file: UploadFile) -> StreamingResponse:

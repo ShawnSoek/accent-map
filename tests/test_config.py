@@ -54,6 +54,9 @@ def _one_class(c):
     (lambda c: c["audio"].update(hop_seconds=6.0), "hop_seconds"),
     (lambda c: c["classes"][0].update(id="Southern Spain"), "id"),
     (lambda c: c.update(model_dir="/tmp"), "model_dir"),
+    (lambda c: c["map"]["panels"][0].update(bbox=[10, 0, 5, 1]), "bbox"),              # west > east
+    (lambda c: c["map"].update(panels=[]), "at least one panel"),
+    (lambda c: c["map"]["panels"].append(dict(c["map"]["panels"][0])), "duplicate panel"),
 ])
 def test_rejects_invalid_config(tmp_path, raw_config, mutate, message):
     raw = copy.deepcopy(raw_config)

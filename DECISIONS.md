@@ -175,3 +175,32 @@ Short notes on each choice and why. Newest at the bottom.
     capture delay isn't included.
 - **Still `httpx` for the test client.** Starlette 1.10 recommends `httpx2`, but the swap was
   blocked by a permission check. The only effect is a deprecation warning in the tests.
+
+## 2026-11-13: Map zones (step 7)
+
+- **Source:** Natural Earth 10m admin-1 states and provinces, v5.1.2 (public domain), pinned to
+  commit `f1890d9f` of nvkelso/natural-earth-vector. File SHA-256 `22d0e3ad…2fb5`; the build
+  script refuses any other file. The download stays in `data/naturalearth/`; only the generated
+  `zones.geojson` (210 KB) is committed. Rebuilding gives a byte-identical file.
+- **The zone table is `models/commonaccent_es6/zones_spec.yaml`, readable and commented.**
+  - Regions are selected by ISO 3166-2 code, by Spanish autonomous community, or by whole country.
+    The most specific rule wins. A typo, or a code listed twice, stops the build.
+  - Debatable choices, marked in the file:
+    - Campeche and Yucatán → Caribbean (Yucatec Spanish is often treated as its own variety).
+    - Tarija → Rioplatense, as "eastern Bolivia".
+    - Tamaulipas stays Mexico.
+    - North-western Argentina is Rioplatense, because the model's label says "Argentina".
+- **"Not covered" areas are drawn greyed out:** the rest of Spain and Central America except
+  Panama. Everything else, such as Brazil, Haiti and the US, is plain land with no borders.
+  The Canaries, Equatorial Guinea and the Philippines fall outside the map panels.
+- **Two panels:** the Americas, and a Spain inset. They're defined in `config.yaml` → `map.panels`
+  and each feature carries its panel, so another model can define different panels.
+- **Neighbouring zones are simplified together** (`shapely.coverage_simplify`), so they keep
+  exactly shared borders, with no gaps or slivers. Islands smaller than 0.02 square degrees
+  (Americas panel) or 0.005 (Spain panel) are dropped.
+- **Checked by tests:**
+  - every class has its zone
+  - the geometry is valid, stays inside its panel and has no overlaps
+  - 44 cities land in the intended zone (e.g. Port-au-Prince is plain land, Santo Domingo is
+    Caribbean, Mendoza is Chilean, Tarija is Rioplatense, Mérida (Venezuela) is Andean while
+    Caracas is Caribbean)
