@@ -234,3 +234,23 @@ Short notes on each choice and why. Newest at the bottom.
 - **File mode:** the browser plays the file locally while the server analyzes it, and the page
   shows the newest event at or before the playback position. Seeking works the same way. If
   analysis falls behind playback, the page says so.
+
+## 2026-11-14: README and from-scratch test (step 9)
+
+- **The README was tested by following it word for word** in a fresh clone, with its own empty
+  model cache:
+  - The clone has 50 files and no `data/`.
+  - `uv venv` and `uv pip install --torch-backend cpu` worked.
+  - `scripts/fetch_model.py` downloaded both pinned models in 5 min 44 s. This was the script's
+    first run against an empty cache; step 2 had used a scratch script.
+  - 187 fast tests and 4 real-model tests passed.
+  - `scripts/serve.py` started, the page, scripts and zones were served, and an upload and a
+    real-time live stream worked: no skipped windows, median delay 0.73 s.
+  - Not tested: the plain-pip alternative in the README.
+- **The startup timing is noisy.** It uses 3 runs. That startup measured 910 ms per window
+  (earlier startups: 777–821 ms), so it chose 1.25 s instead of 1.0 s. The README now says
+  "1.0 s, or 1.25 s if the computer was busy" and points to `--update-seconds 1.0`. Using more
+  runs would cost about 1 s of startup per extra run; left as is for now.
+- **Large scratch work goes on the home disk.** `/tmp` here is a 3.4 GB in-memory tmpfs. The first
+  try of this test filled it (venv plus 2.5 GB of models) and was deleted with the user's
+  permission.

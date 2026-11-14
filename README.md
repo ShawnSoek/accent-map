@@ -61,9 +61,12 @@ far to trust it:
 | Uncertain | No clear winner: the top zone is under 50 %, or less than 15 points ahead of the second. |
 | Confident | The top zone is at least 50 % and clearly ahead. |
 
-**Speed:** the server updates as often as your CPU allows. It aims for every 0.5 s and uses
-1.0 s on an 8-core laptop CPU (Ryzen 7 7730U). There, one update takes about 0.8 s, and the map
-reacts about 0.9 s after you speak. The startup log prints the interval it chose.
+**Speed:** the server updates as often as your CPU allows. It aims for every 0.5 s. At startup
+it times one update and picks a slower interval if needed.
+- On an 8-core laptop CPU (Ryzen 7 7730U), one update takes about 0.8 s. The server picks 1.0 s,
+  or 1.25 s if the computer was busy during that startup measurement.
+- The map then reacts about 0.7–0.9 s after you speak.
+- The startup log prints the interval it chose. `--update-seconds 1.0` fixes it.
 
 ## What the stage-1 model can and can't do
 
