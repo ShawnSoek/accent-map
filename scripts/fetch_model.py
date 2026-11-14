@@ -17,7 +17,7 @@ from server.paths import hf_cache_dir  # noqa: E402
 
 
 def main() -> None:
-    if len(sys.argv) != 2:
+    if len(sys.argv) != 2 or sys.argv[1] in ("-h", "--help"):
         sys.exit(__doc__)
     config = load_config(sys.argv[1])
     cache = hf_cache_dir()

@@ -27,7 +27,7 @@ def sample_clips(model) -> list[Path]:
 
 
 def main() -> None:
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         sys.exit(__doc__)
     t0 = time.time()
     model = load_model(sys.argv[1])
