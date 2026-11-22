@@ -3,7 +3,7 @@
 The model config asks for an update every `hop_seconds` (0.5 s). If one inference
 on a full window takes longer than that (plus headroom), the server updates less
 often: the smallest multiple of `step` seconds that fits. On the dev laptop's CPU
-a 5 s window takes ~0.8 s, so it updates every 1.0 s (DECISIONS.md, option 1).
+a 10 s window takes ~1.6 s, so it updates every 2.0 s (DECISIONS.md).
 """
 
 from __future__ import annotations
@@ -28,8 +28,11 @@ def choose_update_interval(target_seconds: float, infer_ms: float,
     return math.ceil(round(needed / step, 9)) * step
 
 
-def measure_inference_ms(model: AccentModel, window_seconds: float, runs: int = 3, warmup: int = 1) -> float:
-    """Median time of model.predict on a full window of synthetic audio."""
+def measure_inference_ms(model: AccentModel, window_seconds: float, runs: int = 3, warmup: int = 2) -> float:
+    """Median time of model.predict on a full window of synthetic audio.
+
+    The first runs after loading are slower (about 1.8 s vs 1.65 s for a 10 s window on the
+    dev CPU), so two are discarded."""
     rng = np.random.default_rng(0)
     audio = (0.05 * rng.standard_normal(int(window_seconds * model.sample_rate))).astype(np.float32)
     times = []

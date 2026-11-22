@@ -10,7 +10,7 @@ more classes, so the app must never hardcode the class list.
 - Each model lives in models/<name>/ with a config.yaml: display name, source,
   pinned revision, class list (id, label, short description, map zone).
 - The app reads only config.yaml and calls: audio (16 kHz mono) -> {class: probability},
-  one result every ~0.5 s over the last ~5 s of audio.
+  one result every ~0.5 s over the last ~10 s of audio.
 - Read the real class order from the model files; do not assume it.
 
 ## Known facts about the stage-1 model

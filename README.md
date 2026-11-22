@@ -26,7 +26,7 @@ uv pip install --python .venv -r requirements.txt --torch-backend cpu
 # 2. Download the model at its pinned revision into data/hf_cache/ (about 2.5 GB, once)
 .venv/bin/python scripts/fetch_model.py models/commonaccent_es6
 
-# 3. Start the server: it loads the model, times one update and prints "Ready" (about 10 s)
+# 3. Start the server: it loads the model, times one update and prints "Ready" (about 15 s)
 .venv/bin/python scripts/serve.py
 ```
 
@@ -51,22 +51,22 @@ The extra index is where the pinned `torch==2.11.0+cpu` and `torchaudio==2.11.0+
   Press play, and the map follows the audio as it plays. Seeking works too.
 
 The map colours each zone by how likely it is, smoothed over about 1.5 s so it moves instead
-of flickering. The model looks at the last 5 s of audio. The status above the map says how
-far to trust it:
+of flickering. The model looks at the last 10 s of audio, so each result rests on several
+sentences and changes calmly. The status above the map says how far to trust it:
 
 | Status | Meaning |
 |---|---|
 | Listening… | Less than 2 s of speech heard so far. Early guesses are shown faintly. |
-| No speech | The last few seconds were (nearly) silent. The last result is kept, dimmed. |
+| No speech | Less than 0.75 s of sound in the last 10 s. The last result is kept, dimmed. |
 | Uncertain | No clear winner: the top zone is under 50 %, or less than 15 points ahead of the second. |
 | Confident | The top zone is at least 50 % and clearly ahead. |
 
 **Speed:** the server updates as often as your CPU allows. It aims for every 0.5 s. At startup
 it times one update and picks a slower interval if needed.
-- On an 8-core laptop CPU (Ryzen 7 7730U), one update takes about 0.8 s. The server picks 1.0 s,
-  or 1.25 s if the computer was busy during that startup measurement.
-- The map then reacts about 0.7–0.9 s after you speak.
-- The startup log prints the interval it chose. `--update-seconds 1.0` fixes it.
+- On an 8-core laptop CPU (Ryzen 7 7730U), one update of the 10 s window takes about 1.6 s. The
+  server picks 2.0 s, or a little more if the computer was busy during that startup measurement.
+- The map then reacts about 1.7 s after you speak.
+- The startup log prints the interval it chose. `--update-seconds 2.0` fixes it.
 
 ## What the stage-1 model can and can't do
 
@@ -124,7 +124,7 @@ Useful scripts (each prints its usage with `--help` or no arguments):
 | `scripts/serve.py` | Start the server (`--model`, `--host`, `--port`, `--update-seconds`). |
 | `scripts/fetch_model.py <model dir>` | Download a model's files at the pinned revisions. |
 | `scripts/check_model.py <model dir> [files…]` | Classify whole files, or the model's sample clips. |
-| `scripts/bench_latency.py` | Time one update for window lengths 1–5 s and 4/8/16 threads. |
+| `scripts/bench_latency.py` | Time one update for window lengths 1–10 s and 4/8/16 threads. |
 | `scripts/stream_wav.py <file>` | Play a file into a running server like a microphone, and print the delays. |
 | `scripts/build_zones.py <model dir>` | Rebuild the map zones from Natural Earth (download command in the script). |
 

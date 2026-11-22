@@ -254,3 +254,36 @@ Short notes on each choice and why. Newest at the bottom.
 - **Large scratch work goes on the home disk.** `/tmp` here is a 3.4 GB in-memory tmpfs. The first
   try of this test filled it (venv plus 2.5 GB of models) and was deleted with the user's
   permission.
+
+## 2026-11-22: 10 s window
+
+- **The window is now 10 s instead of 5 s.** The user found the map changed too fast.
+  CLAUDE.md was updated with permission ("over the last ~10 s of audio").
+- **Measured on the Ryzen 7 7730U, 8 threads, median of 15 runs:**
+
+  | Window | Time per update |
+  |---|---|
+  | 5 s | 808 ms |
+  | 7.5 s | 1185 ms |
+  | 10 s | 1585 ms |
+
+  Inference time is linear in the window length. With a 10 s window the server updates every
+  2.0–2.25 s (the target is still 0.5 s), and a live stream takes about 1.2–1.7 s from audio to
+  map.
+- **Effect,** checked on the 4 sample clips joined into 26 s of audio:
+  - The 10 s window gives half as many updates, steadier percentages, and 3 flips of the top
+    zone instead of 4.
+  - The price is slower switching: a new speaker needs roughly 5–10 s to take over the map. The
+    4.2 s Spain clip at the end ends "uncertain, Mexico 38 %" because the window still holds 6 s
+    of the Mexico clip.
+  - "No speech" now appears only after about 9 s of silence, since the window must hold under
+    0.75 s of sound.
+  - Smoothing is unchanged (τ = 1.5 s), and so is the 2 s "listening" threshold.
+- **The startup timing discards 2 warm-up runs instead of 1.** Right after loading, the first
+  runs take about 1.8 s and then settle at about 1.65 s. Startups measured 1758–1926 ms
+  (2.25–2.5 s updates) and the benchmark 1585 ms. This machine sits right at the 1667 ms
+  boundary for 2.0 s updates, so the interval can differ between startups;
+  `--update-seconds 2.0` fixes it. The 1.2× safety margin is kept, so file analysis stays ahead
+  of playback.
+- **The benchmark joins all sample clips** (about 26 s), because the longest single clip
+  (8.7 s) is shorter than a 10 s window. Default windows: 1, 2.5, 5, 7.5, 10 s.

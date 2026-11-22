@@ -37,8 +37,8 @@ backend_options:
 
 audio:
   sample_rate: 16000
-  window_seconds: 5.0
-  hop_seconds: 0.5
+  window_seconds: 10.0   # 5.0 until 2026-11-22; 10 s gives calmer results (DECISIONS.md)
+  hop_seconds: 0.5       # target; the server updates less often if the CPU is slower
 
 caveats:
   - "Reported accuracy is 68.5% on Common Voice read speech. Expect less on your own recordings."

@@ -25,6 +25,7 @@ def test_stage1_config_is_valid():
     assert config.source.revision == "0eff6f06bdbbcd75cafe3260c00a93985ca36d2d"
     assert config.backend_options["base_model"]["revision"] == "c3f9d884181a224a6ac87bf8885c84d1cff3384f"
     assert config.audio.sample_rate == 16000
+    assert config.audio.window_seconds == 10.0
     assert config.model_dir == REAL_MODEL_DIR.resolve()
     assert (config.model_dir / config.backend_options["hparams_file"]).is_file()
 
@@ -51,7 +52,7 @@ def _one_class(c):
     (_one_class, "at least 2"),
     (lambda c: c.update(clases=c.pop("classes")), "clases"),               # typo in a key
     (lambda c: c["source"].update(revision="main"), "revision"),           # branch, not a pinned SHA
-    (lambda c: c["audio"].update(hop_seconds=6.0), "hop_seconds"),
+    (lambda c: c["audio"].update(hop_seconds=c["audio"]["window_seconds"] + 1), "hop_seconds"),
     (lambda c: c["classes"][0].update(id="Southern Spain"), "id"),
     (lambda c: c.update(model_dir="/tmp"), "model_dir"),
     (lambda c: c["map"]["panels"][0].update(bbox=[10, 0, 5, 1]), "bbox"),              # west > east

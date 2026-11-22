@@ -37,11 +37,11 @@ def cpu_name() -> str:
 
 
 def speech_audio(model) -> np.ndarray:
-    """The longest sample clip of the model repo, so every window is real speech."""
+    """All sample clips of the model repo joined (~26 s), so every window is real speech."""
     src = model.config.source
     clips = sorted((hf_cache_dir() / f"models--{src.repo.replace('/', '--')}" / "snapshots"
                     / src.revision / "data").glob("*.wav"))
-    return max((decode_file(c, model.sample_rate) for c in clips), key=len)
+    return np.concatenate([decode_file(c, model.sample_rate) for c in clips])
 
 
 def measure(model, audio, window_s, warmup, runs):
@@ -63,7 +63,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("model_dir", nargs="?", default=str(MODELS_DIR / "commonaccent_es6"))
     ap.add_argument("--threads", type=int, nargs="+", default=[4, 8, 16])
-    ap.add_argument("--windows", type=float, nargs="+", default=[1, 2, 3, 4, 5])
+    ap.add_argument("--windows", type=float, nargs="+", default=[1, 2.5, 5, 7.5, 10])
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--runs", type=int, default=30)
     ap.add_argument("--out", default=str(DATA_DIR / "bench" / "latest.json"))

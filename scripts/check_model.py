@@ -5,7 +5,7 @@ Usage:
   python scripts/check_model.py models/commonaccent_es6 a.wav b.flac
 
 Prints load time, peak memory, the model's class order and per-file probabilities.
-Each file is classified as one piece (no 5 s windowing), resampled with soxr.
+Each file is classified as one piece (no windowing), resampled with soxr.
 """
 
 import resource
