@@ -566,3 +566,26 @@ Short notes on each choice and why. Newest at the bottom.
     confirmed that `uv run` then keeps the packages.
   - An explicit `uv sync` still removes them, and uv has no setting against that. The README's
     troubleshooting section now says so and gives the fix. `uv.lock` is ignored.
+
+## 2026-11-22: Stage 2, step 4: first Kaggle run stopped by its own check; fixed
+
+- The upload worked: the private dataset `shawnsker/accent-map-cv27-es10` is ready. The first
+  run of `shawnsker/accent-map-features-cv27-es10` stopped after 3 minutes with "bundle files
+  differ from files.sha256", before any GPU work.
+- **Cause: Kaggle unpacks uploaded archives,** both `bundle.tar` and the noise zip inside it,
+  which became a folder `noise/rirs_noises/`. `run.py` expected the tar case to be possible,
+  but not the inner zip.
+- **Fix, without uploading again** (only `run.py` changes; pushing it is free):
+  - **Unpacked archives:** an archive Kaggle unpacked is checked as a whole, by one SHA-256
+    over the sorted list of its files' checksums. `scripts/kaggle_bundle.py meta` computes
+    that from the pinned zip (61,273 files) and writes it into the job's `run.py`, using
+    run.py's own function, so both sides compute it the same way. A changed noise file is
+    detected (tested).
+  - **Read-only input:** `/kaggle/input` is read-only, so the job reads the bundle through a
+    folder of links in `/tmp/work`.
+  - **Faster search:** the bundle is looked for at most 4 folders deep. The full search of
+    `/kaggle/input` had taken 3 minutes of GPU time.
+- **Rehearsal:** the real `bundle.tar` was unpacked as Kaggle does it, including the inner zip,
+  and the folder was made read-only. Then the job's own steps ran here on the CPU:
+  - all 64,073 files were checked in 60 s
+  - the reference check gave results identical to the reference for all 48 items

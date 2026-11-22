@@ -9,8 +9,10 @@ SHA-256 of every other file.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import tarfile
+import zipfile
 from pathlib import Path
 
 from training.archives import sha256_of
@@ -63,3 +65,38 @@ def write_bundle(tar_path: Path, files: dict[str, Path], texts: dict[str, str | 
             info.size = len(blobs[name])
             tar.addfile(info, io.BytesIO(blobs[name]))
     return sha256_of(tar_path), len(digests)
+
+
+UNPACKED_LINE = "UNPACKED_ARCHIVES: dict[str, list] = {}"
+
+
+def load_run_module(path: Path):
+    """scripts/kaggle_run.py as a module (it is a standalone script, not part of the package)."""
+    spec = importlib.util.spec_from_file_location("kaggle_run", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def zip_tree_hash(zip_path: Path, run_module) -> tuple[str, int]:
+    """The tree hash run.py computes over the folder Kaggle makes when it unpacks this zip."""
+    entries = {}
+    with zipfile.ZipFile(zip_path) as z:
+        for info in z.infolist():
+            if info.is_dir():
+                continue
+            sha = hashlib.sha256()
+            with z.open(info) as f:
+                while chunk := f.read(8 << 20):
+                    sha.update(chunk)
+            entries[info.filename] = sha.hexdigest()
+    return run_module.tree_listing(entries)
+
+
+def run_script_with_archives(run_py: Path, archives: dict[str, tuple[str, int]]) -> str:
+    """run.py's text with UNPACKED_ARCHIVES filled in."""
+    text = Path(run_py).read_text(encoding="utf-8")
+    if text.count(UNPACKED_LINE) != 1:
+        raise ValueError(f"{run_py} must contain the line {UNPACKED_LINE!r} exactly once")
+    filled = "UNPACKED_ARCHIVES: dict[str, list] = " + repr({k: [h, n] for k, (h, n) in archives.items()})
+    return text.replace(UNPACKED_LINE, filled)

@@ -111,3 +111,77 @@ def test_run_script_refuses_unsafe_tar_members(tmp_path, name, kind):
     with pytest.raises(SystemExit):
         kaggle_run.safe_untar(tar_path, tmp_path / "work")
     assert not (tmp_path / "evil").exists()
+
+
+def make_unpacked_bundle(tmp_path):
+    """A bundle as Kaggle presents it: tar unpacked, and the noise zip inside unpacked too."""
+    import zipfile
+
+    from fakes import make_noise_folder
+    from training.kaggle_bundle import zip_tree_hash
+
+    src = tmp_path / "src"
+    make_noise_folder(src / "noise_files")
+    zip_path = src / "rirs_noises.zip"
+    with zipfile.ZipFile(zip_path, "w") as z:
+        for p in sorted((src / "noise_files").rglob("*")):
+            if p.is_file():
+                z.write(p, p.relative_to(src / "noise_files").as_posix())
+    (src / "a.mp3").write_bytes(b"\xff\xfb" * 50)
+    for name in ("augment.yaml", "features.yaml"):
+        (src / name).write_text((REPO / "training/cv27_es10" / name).read_text())
+    (src / "items.tsv").write_text("id\tset\taugment\tclips\n")
+    tar = tmp_path / "upload" / "bundle.tar"
+    write_bundle(tar, {"clips/a.mp3": src / "a.mp3", "items.tsv": src / "items.tsv", "augment.yaml": src / "augment.yaml",
+                       "features.yaml": src / "features.yaml", "noise/rirs_noises.zip": zip_path}, {})
+    (tmp_path / "input" / "datasets" / "user" / "ds").mkdir(parents=True)
+    dataset = tmp_path / "input" / "datasets" / "user" / "ds"
+    (dataset / "manifest.json").write_text(json.dumps({"name": "accent-map test", "built": "now", "items": 0}))
+    bundle = kaggle_run.safe_untar(tar, dataset)
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(bundle / "noise" / "rirs_noises")
+    (bundle / "noise" / "rirs_noises.zip").unlink()
+    return bundle, {"noise/rirs_noises.zip": list(zip_tree_hash(zip_path, kaggle_run))}
+
+
+def test_an_archive_kaggle_unpacked_is_checked_as_a_tree(tmp_path):
+    bundle, archives = make_unpacked_bundle(tmp_path)
+    assert kaggle_run.tree_hash(bundle / "noise" / "rirs_noises") == tuple(archives["noise/rirs_noises.zip"])
+    assert kaggle_run.check_files(bundle, archives) == 5
+    with pytest.raises(SystemExit, match="missing \\['noise/rirs_noises.zip'\\]"):
+        kaggle_run.check_files(bundle, {})                     # what happened on the first Kaggle run
+    wav = next((bundle / "noise" / "rirs_noises").rglob("*.wav"))
+    wav.write_bytes(wav.read_bytes()[:-2] + b"xx")
+    with pytest.raises(SystemExit, match="differs from the pinned archive"):
+        kaggle_run.check_files(bundle, archives)
+
+
+def test_bundle_is_found_a_few_levels_down_without_a_full_search(tmp_path):
+    bundle, _ = make_unpacked_bundle(tmp_path)
+    tar, unpacked, manifest = kaggle_run.find_bundle(tmp_path / "input")
+    assert tar is None and unpacked == bundle and manifest["name"] == "accent-map test"
+    deep = tmp_path / "deep" / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir(parents=True)
+    (deep / "manifest.json").write_text('{"name": "accent-map"}')
+    with pytest.raises(SystemExit, match="expected one"):
+        kaggle_run.find_bundle(tmp_path / "deep")
+
+
+def test_view_links_the_read_only_bundle(tmp_path):
+    from training.augment import NoiseBank
+    bundle, archives = make_unpacked_bundle(tmp_path)
+    view = kaggle_run.make_view(bundle, tmp_path / "work")
+    assert sorted(p.name for p in view.iterdir()) == ["augment.yaml", "clips", "features.yaml", "items.tsv", "noise"]
+    assert (view / "clips" / "a.mp3").read_bytes().startswith(b"\xff\xfb")
+    bank = NoiseBank(view / "noise", ["smallroom", "mediumroom"])
+    assert len(bank.real_rirs) == 3 and bank.noises["background"]
+
+
+def test_run_script_gets_the_archive_hashes():
+    from training.kaggle_bundle import run_script_with_archives
+    text = run_script_with_archives(REPO / "scripts" / "kaggle_run.py", {"noise/x.zip": ("ab" * 32, 7)})
+    namespace = {}
+    exec(compile(text.split("\ndef log", 1)[0], "run.py", "exec"), namespace)     # just the constants
+    assert namespace["UNPACKED_ARCHIVES"] == {"noise/x.zip": ["ab" * 32, 7]}
+    with pytest.raises(ValueError, match="exactly once"):
+        run_script_with_archives(REPO / "README.md", {})

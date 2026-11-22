@@ -12,12 +12,12 @@ data/kaggle/<name>/ (not committed):
 It first checks the Common Voice archive, noise zip and base model against their pinned
 checksums, and computes the reference items on this CPU (about a minute).
 meta writes upload/dataset-metadata.json (a private dataset) and job/ (run.py and
-kernel-metadata.json: GPU and internet on, the dataset attached).
+kernel-metadata.json: GPU and internet on, the dataset attached). run.py gets the noise
+collection's tree hash, so it can check the folder Kaggle makes when it unpacks the zip.
 """
 
 import argparse
 import json
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,7 +35,8 @@ from training.extract_job import run  # noqa: E402
 from training.feature_items import (SETS, Job, make_items, read_split, write_local_table,  # noqa: E402
                                     write_upload_table)
 from training.features import FeatureExtractor, load_features_spec  # noqa: E402
-from training.kaggle_bundle import choose_reference, kaggle_requirements, write_bundle  # noqa: E402
+from training.kaggle_bundle import (choose_reference, kaggle_requirements, load_run_module,  # noqa: E402
+                                    run_script_with_archives, write_bundle, zip_tree_hash)
 
 DATASET_SLUG = "accent-map-{name}"
 KERNEL_SLUG = "accent-map-features-{name}"
@@ -130,7 +131,12 @@ def meta(folder: Path, user: str) -> None:
         {"title": DATASET_SLUG.format(name=slug), "id": dataset, "licenses": [{"name": "CC0-1.0"}]}, indent=1))
     job = out / "job"
     job.mkdir(exist_ok=True)
-    shutil.copy(REPO / "scripts" / "kaggle_run.py", job / "run.py")
+    aug = load_augment_spec(folder / "augment.yaml")
+    run_py = REPO / "scripts" / "kaggle_run.py"
+    tree = zip_tree_hash(REPO / "data" / "noise" / aug.noise_archive, load_run_module(run_py))
+    (job / "run.py").write_text(run_script_with_archives(run_py, {f"noise/{aug.noise_archive}": tree}),
+                                encoding="utf-8")
+    print(f"noise collection tree hash {tree[0][:16]}... over {tree[1]} files, written into run.py")
     kernel = KERNEL_SLUG.format(name=slug)
     (job / "kernel-metadata.json").write_text(json.dumps({
         "id": f"{user}/{kernel}", "title": kernel, "code_file": "run.py", "language": "python",
