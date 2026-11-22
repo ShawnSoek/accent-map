@@ -488,3 +488,81 @@ Short notes on each choice and why. Newest at the bottom.
   - The real collection loads, with nothing missing, everything at 16 kHz.
   - `scripts/augment_preview.py` wrote one clean and one augmented clip per class for the user
     to listen to.
+
+## 2026-11-22: Stage 2, step 4, part A: base-model features, prepared for a Kaggle GPU
+
+- **Approach A,** as recommended: keep the base model frozen and train only a small classifier
+  later.
+  - The base model is `facebook/wav2vec2-large-xlsr-53` at the pinned revision, with the
+    SHA-256 of its 3 files in `training/cv27_es10/features.yaml`. Loading is strict: no
+    missing weights; 7 pre-training weights are unused.
+  - The stage-1 model's fine-tuned encoder is not used. It was trained on Common Voice 11
+    without a speaker split, so it may have heard our test speakers.
+- **What is stored per piece of audio:** for each of the 25 hidden states, the mean and the
+  standard deviation over time. That is float16, (25, 2048), 100 KB.
+  - Input is normalized to zero mean and unit variance, as the model's preprocessor config
+    says. A test checks this against transformers' own function.
+  - **Layers 22 and 23 reach about 38,000** before the final layer norm (seen on 20 test clips),
+    close to float16's maximum of 65,504. They are stored divided by 256, which is exact, and
+    any value that would still overflow is an error, never inf.
+- **Items:** 119,980 in total.
+
+  | Set | Items |
+  |---|---|
+  | train | 48,117 |
+  | train_aug (the noisy copy of each training clip) | 48,117 |
+  | dev | 6,180 |
+  | test | 9,757 |
+  | dev_pairs | 3,027 |
+  | test_pairs | 4,782 |
+
+  - The pairs join two clips of the same speaker into about 10 s, for evaluating at the app's
+    window length.
+  - This comes to about 12 GB of features.
+- **Why Kaggle:** this CPU processes 4.1 s of audio per second, so all items would take about
+  45 h. A GPU should take 1–2 h; that's an estimate.
+  - The user chose to upload only the 64,054 clips we use (2.6 GB) as a **private** Kaggle
+    dataset. Common Voice is CC0, but Mozilla asks that copies not be hosted elsewhere, so
+    speakers who withdraw can be removed. The user decides whether to delete the dataset after
+    the run.
+  - Nothing personal goes up: no speaker ids, accents or genders. The upload table has only
+    item ids, sets and clip file names. Accents, speakers and genders stay in
+    `data/kaggle/cv27_es10/local/items_local.tsv`.
+- **The bundle** (`scripts/kaggle_bundle.py build`): one `bundle.tar`, 4.08 GB, SHA-256
+  `bc376a363dec2450057a479f39c8b0de583012e0d07e3e31087e10663b01cd07`.
+  - Contents: the clips, the noise zip, the item table, the three settings files, the code,
+    the pinned library list, and reference results for 48 items (8 per set, including noisy
+    copies and pairs) computed on this CPU.
+  - Plus `files.sha256` for all 64,073 files.
+  - Before building, the script checks the Common Voice archive, the noise zip and the base
+    model against their pinned checksums.
+  - The 13 code and settings files inside were checked to be byte-identical to commit
+    `b832955`. The manifest's "dirty" flag was set, for an unknown reason.
+- **On Kaggle** (`scripts/kaggle_run.py`, copied there as `run.py`), each step is checked
+  before the next:
+  1. The tar's checksum; it is unpacked safely (only regular files under `bundle/`) and every
+     file's checksum is checked. A bundle that Kaggle has already unpacked also works.
+  2. The pinned libraries are installed. Kaggle's own torch, numpy and scipy stay, and their
+     versions are logged.
+  3. The base model is downloaded at its revision and its checksums are checked.
+  4. The noise collection is checked and unpacked, without the unused large halls.
+  5. **The 48 reference items must match the laptop:** cosine ≥ 0.9999 and relative difference
+     ≤ 2 %. Otherwise it stops before the full run.
+  6. One process per GPU. TF32 is off, so newer GPUs compute in full float32 like the CPU.
+  7. `summary.json` with the versions and the checksum of every output file.
+- **Dry run on the laptop:** the bundle was unpacked, all 64,073 files were checked, and the job
+  ran from the bundle's own copy of the code. Its results for all 48 reference items were
+  identical to the reference. So the bundle doesn't depend on anything else in the repo.
+- **Bugs found by the tests before any real run:**
+  - `Path.with_suffix` read ".part0of2" as a file extension, so two GPUs would have written to
+    the same file.
+  - Item numbering was quadratic, far too slow for 120,000 items.
+- **Incident:** running `uv sync` in the repo emptied `.venv`.
+  - uv read `pyproject.toml` (tool settings only) as a project without dependencies and
+    removed every package.
+  - Reinstalled with the README's commands (with the user's OK); the installed set matches the
+    pinned files exactly. All 274 fast and 4 real-model tests pass again.
+  - `pyproject.toml` now has `[tool.uv] managed = false`. A test in a throwaway folder
+    confirmed that `uv run` then keeps the packages.
+  - An explicit `uv sync` still removes them, and uv has no setting against that. The README's
+    troubleshooting section now says so and gives the fix. `uv.lock` is ignored.

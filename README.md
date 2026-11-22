@@ -105,6 +105,10 @@ dialect zones, not countries:
 - **"Microphone access was blocked".** Allow the microphone in the browser's address bar.
   Browsers only allow microphones on `https://` or `http://localhost`, so use `localhost`, not
   the machine's IP address.
+- **`No module named ...` after running `uv sync`.** Don't use `uv sync` here: this repo pins its
+  packages in `requirements.txt`, so `uv sync` finds no dependencies and removes everything from
+  `.venv`. Run the two install commands of step 1 again. (`uv run` is safe: `pyproject.toml` tells
+  uv not to manage this environment.)
 - **`ModelFilesMissing` at startup.** Run step 2, `scripts/fetch_model.py`.
 - **Killed while loading, or out of memory.** Loading needs about 2.8 GB of RAM. On WSL2, raise
   the limit with `memory=8GB` under `[wsl2]` in `%UserProfile%\.wslconfig`, then run `wsl --shutdown`.

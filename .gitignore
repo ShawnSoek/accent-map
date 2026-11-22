@@ -18,3 +18,6 @@ pretrained_models/
 
 # Credentials
 .env
+
+# uv run writes a lock file; packages are pinned in requirements*.txt instead
+uv.lock

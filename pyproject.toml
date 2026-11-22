@@ -1,5 +1,10 @@
 # Tool configuration only. Dependencies are pinned in requirements.txt.
 
+# This is not a uv project: without this, `uv sync` or `uv run` here reads this file as a project
+# with no dependencies and removes every package from .venv (happened 2026-11-22).
+[tool.uv]
+managed = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
