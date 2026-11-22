@@ -1,0 +1,26 @@
+# How training copies of the clips are made noisier (stage 2). Read by src/training/augment.py.
+# Each clip's choices come from a SHA-256 of the seed and the clip name, so a copy is the same on
+# every run. Applied in this order: room echo, noise, microphone filters, volume, limiting.
+# Only for training copies: dev and test stay clean (a separate noisy test can be added later).
+
+noise_archive: rirs_noises.zip          # OpenSLR 28, in data/noise/ (not committed)
+noise_sha256: 3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7
+seed: "2026-11-22-augment"
+
+reverb:
+  probability: 0.5
+  real_share: 0.5                        # else simulated; real RIRs: first channel
+  simulated_rooms: [smallroom, mediumroom]   # 1-30 m rooms; large halls (30-50 m) left out
+
+noise:
+  probability: 0.6
+  snr_db: [5, 20]                        # against the speech level (loud frames only)
+  kinds: [isotropic, background, foreground]   # chosen with equal chance
+
+highpass:                                # small laptop microphones lose the low end
+  probability: 0.5
+  hz: [80, 300]
+lowpass:                                 # and sometimes the top end
+  probability: 0.3
+  hz: [3500, 7000]
+gain_db: [-6, 6]

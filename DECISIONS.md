@@ -439,3 +439,52 @@ Short notes on each choice and why. Newest at the bottom.
 - **The lists stay in `data/commonvoice/splits/cv27_es10/`** (not committed), because they hold
   speaker ids. The Common Voice terms forbid sharing the data. The spec plus the script remake
   them exactly.
+
+## 2026-11-22: Stage 2, step 3: clips, noise collection, training copies
+
+- **Train on the clips as they are, about 5 s each, and use 10 s windows at inference** (the
+  user's wish).
+  - The model averages over time, so the input length is free. The stage-1 model was also
+    trained on single clips.
+  - There are no artificial joins, and twice as many examples.
+  - The risk is a small length mismatch. Evaluation will therefore also use 10 s test windows,
+    made by joining two clips of the same test speaker (for evaluation only), and later the
+    user's own recordings.
+- **The clips:** `scripts/cv_extract.py --clips` made a second pass over the archive (5 min) and
+  extracted the 64,054 clips that the split lists need (2.6 GB).
+  - The archive's checksum is unchanged, and no clip was missing.
+  - `scripts/cv_check_clips.py` decoded all of them in 49 s. Sample rates: 48 kHz (49,469),
+    32 kHz (14,305), 44.1 kHz (280); the decoder resamples to 16 kHz. Lengths match
+    `clip_durations.tsv` within 1 ms.
+- **The noise collection is the user's choice:** OpenSLR 28 "Room Impulse Response and Noise
+  Database".
+  - File: `rirs_noises.zip`, 1.3 GB, Apache 2.0. SHA-256
+    `3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7`, computed by us; the page
+    shows none.
+  - It was unpacked by `scripts/noise_extract.py` (24 s, 3.8 GB) with the same safety rules,
+    plus a limit on the unpacked size.
+  - The noise sounds are public domain (Freesound, via MUSAN). The page doesn't say whether the
+    three sources of the real room recordings (RWCP, REVERB 2014, AIR) have their own terms.
+    We only mix them into training audio and never share them; the README credits all sources.
+- **Training copies** follow `training/cv27_es10/augment.yaml`, pinned to the collection's
+  checksum. In order:
+  - **Room echo** (50 % of clips): half real rooms (325, first channel), half simulated small
+    and medium rooms (40,000). Large halls of 30–50 m are left out as unlike laptop use. The
+    echo is aligned on its direct sound, and the level is kept.
+  - **Noise** (60 %): room noise (92), background sounds (37) or foreground sounds (789), at
+    5–20 dB below the speech. The speech level counts only loud 20 ms frames, so leading
+    silence doesn't make the noise weaker than intended.
+    - The 17 sounds under 0.5 s (down to 26 ms) are left out, because repeated they would
+      buzz.
+  - **Laptop microphone:** high-pass at 80–300 Hz (50 %) and low-pass at 3.5–7 kHz (30 %).
+  - **Volume:** ±6 dB, then limited to 0.99.
+  - Every choice comes from a SHA-256 of the seed and the clip name, so a clip always gets the
+    same copy. About 7 % of copies end up untouched.
+  - Dev and test stay clean.
+- **Checked:**
+  - Tests for: the list files; unsafe paths; fixed plans and the probabilities over 3,000
+    clips; the SNR (within 0.3 dB, with leading silence); echo alignment and level; the filters
+    (over 95 % kept in the passband, under 5 % in the stopband); and limiting.
+  - The real collection loads, with nothing missing, everything at 16 kHz.
+  - `scripts/augment_preview.py` wrote one clean and one augmented clip per class for the user
+    to listen to.

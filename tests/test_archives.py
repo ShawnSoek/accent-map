@@ -4,7 +4,7 @@ import hashlib
 import io
 import tarfile
 
-from training.cv_archive import safe_relative, scan
+from training.archives import safe_relative, scan
 
 
 def add(tar, name, data=b"", kind=tarfile.REGTYPE, linkname=""):
@@ -62,3 +62,41 @@ def test_safe_relative():
     assert safe_relative("a/../../b") is None
     assert safe_relative("/a") is None
     assert safe_relative("") is None
+
+
+def make_zip(path):
+    import zipfile
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("NOISE/README", "about")
+        z.writestr("NOISE/a.wav", b"RIFF" + b"\0" * 100)
+        z.writestr("NOISE/sub/", "")                              # a folder entry
+        z.writestr("../evil.wav", b"outside")
+        z.writestr("/abs.wav", b"absolute")
+        link = zipfile.ZipInfo("NOISE/link.wav")
+        link.external_attr = (0o120777 << 16)
+        z.writestr(link, "/etc/passwd")
+
+
+def test_zip_extracts_only_safe_files(tmp_path):
+    from training.archives import extract_zip
+    archive = tmp_path / "n.zip"
+    make_zip(archive)
+    out = tmp_path / "out"
+    result = extract_zip(archive, out)
+    assert sorted(result.extracted) == ["NOISE/README", "NOISE/a.wav"]
+    assert sorted(result.skipped) == ["../evil.wav", "/abs.wav", "NOISE/link.wav"]
+    assert (out / "NOISE/a.wav").read_bytes().startswith(b"RIFF")
+    assert not (tmp_path / "evil.wav").exists() and not (out / "NOISE/link.wav").exists()
+    assert result.sha256 == hashlib.sha256(archive.read_bytes()).hexdigest()
+    only_wav = extract_zip(archive, tmp_path / "wav", want=lambda n: n.endswith(".wav"))
+    assert "NOISE/README" not in only_wav.extracted
+
+
+def test_zip_size_limit(tmp_path):
+    import pytest
+    from training.archives import extract_zip
+    archive = tmp_path / "n.zip"
+    make_zip(archive)
+    with pytest.raises(ValueError, match="would unpack"):
+        extract_zip(archive, tmp_path / "out", max_bytes=50)
+    assert not (tmp_path / "out").exists()

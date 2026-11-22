@@ -1,8 +1,8 @@
-"""Read a Common Voice release archive (.tar.gz) in one streaming pass.
+"""Read downloaded archives safely: a .tar.gz in one streaming pass (`scan`), or a .zip (`extract_zip`).
 
-One pass over the file computes its SHA-256, lists every member and extracts the members the
-caller asks for. The archive is downloaded data, so only regular files with plain relative
-paths are written, inside the output folder: links, devices, absolute paths and ".." are skipped.
+Both compute the archive's SHA-256 and extract the members the caller asks for. Archives are
+downloaded data, so only regular files with plain relative paths are written, inside the output
+folder: links, devices, absolute paths and ".." are skipped.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import shutil
 import tarfile
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -84,6 +85,46 @@ def scan(archive: Path, out_dir: Path, want: Callable[[str], bool], listing: Pat
             pass
     result.sha256 = reader.sha.hexdigest()
     result.archive_bytes = reader.bytes
+    return result
+
+
+def sha256_of(path: Path) -> str:
+    sha = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(CHUNK):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def extract_zip(archive: Path, out_dir: Path, want: Callable[[str], bool] = lambda name: True,
+                max_bytes: int = 20 * 10**9) -> ScanResult:
+    """Extract wanted regular files of a zip into `out_dir`. Refuses archives that would unpack
+    to more than `max_bytes` (counting what is wanted), and checks each file's size as it goes."""
+    out_dir = Path(out_dir)
+    result = ScanResult(sha256=sha256_of(archive), archive_bytes=Path(archive).stat().st_size)
+    with zipfile.ZipFile(archive) as z:
+        infos = z.infolist()
+        result.members = len(infos)
+        wanted = [i for i in infos if want(i.filename) and not i.is_dir()]
+        total = sum(i.file_size for i in wanted)
+        if total > max_bytes:
+            raise ValueError(f"{archive} would unpack to {total / 1e9:.1f} GB, more than {max_bytes / 1e9:.1f} GB")
+        for info in wanted:
+            rel = safe_relative(info.filename)
+            is_link = (info.external_attr >> 16) & 0o170000 == 0o120000
+            if rel is None or is_link:
+                result.skipped.append(info.filename)
+                continue
+            target = out_dir.joinpath(*rel.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(info) as src, open(target, "wb") as dst:
+                written = 0
+                while chunk := src.read(CHUNK):
+                    written += len(chunk)
+                    if written > info.file_size:
+                        raise ValueError(f"{info.filename} is larger than its header says")
+                    dst.write(chunk)
+            result.extracted.append(str(rel))
     return result
 
 

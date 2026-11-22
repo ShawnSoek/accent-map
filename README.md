@@ -165,3 +165,8 @@ data/            downloads and your own recordings (not committed)
   (Zuluaga-Gomez et al., 2023, arXiv:2305.18283).
 - Base model: facebook/wav2vec2-large-xlsr-53 (Apache-2.0).
 - Map data: made with [Natural Earth](https://www.naturalearthdata.com/) (public domain).
+- Training our own model (branch `stage2-own-model`): speech from Mozilla Common Voice 27.0 Spanish, via
+  Mozilla Data Collective under its Data Consumer Terms. Room echo and noise from the
+  [Room Impulse Response and Noise Database](https://www.openslr.org/28/) (OpenSLR 28, Apache 2.0; real
+  room recordings from RWCP, REVERB 2014 and AIR; noise sounds from the public-domain Freesound part of
+  MUSAN).
