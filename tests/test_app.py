@@ -2,15 +2,19 @@
 
 import io
 import json
+import threading
+import time
 
+import httpx2
 import numpy as np
 import pytest
 import soundfile as sf
+import uvicorn
 import yaml
 from fastapi.testclient import TestClient
 
 from fakes import fake_config, tone
-from server.app import Engine, build_engine, create_app
+from server.app import Engine, FileStore, build_engine, create_app
 from server.audio import decode_file
 from server.model_api import load_model
 from server.session import AnalysisSession, SessionSettings
@@ -112,6 +116,88 @@ def test_upload_rejects_bad_files(content, status, message):
     assert r.status_code == status
     assert message in r.json()["detail"]
     assert "BytesIO" not in r.json()["detail"]   # no internals in user-facing messages
+
+
+# --- POST /api/files + GET /api/files/{id}/events ------------------------------------
+
+def test_upload_once_then_events_from_any_position():
+    client, model = make_client()
+    data = wav_bytes(tone(model.class_frequency("c1"), 8.0), SR)
+    info = client.post("/api/files", files={"file": ("a.wav", data)}).json()
+    assert info["filename"] == "a.wav" and info["duration"] == 8.0
+    assert info["update_seconds"] == 0.5 and info["first_t"] == 1.0
+    url = f"/api/files/{info['id']}/events"
+
+    whole = [m for m in ndjson(client.get(url)) if m["type"] == "event"]
+    one_call = [m for m in ndjson(client.post("/api/analyze", files={"file": ("a.wav", data)}))
+                if m["type"] == "event"]
+    strip = lambda d: {k: v for k, v in d.items() if k != "infer_ms"}  # noqa: E731
+    assert [strip(m) for m in whole] == [strip(m) for m in one_call]
+
+    later = ndjson(client.get(url, params={"start": 5.3}))
+    assert later[0]["type"] == "meta" and later[0]["start"] == 5.3
+    events = [m for m in later if m["type"] == "event"]
+    assert [e["t"] for e in events] == [5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0]
+    assert [e["index"] for e in events] == [e["index"] for e in whole if e["t"] >= 5.0]   # same numbering
+    assert later[-1] == {"type": "done", "events": len(events)}
+
+
+def test_start_is_clamped_to_the_file():
+    client, model = make_client()
+    file_id = client.post("/api/files", files={"file": ("a.wav", wav_bytes(tone(300, 3.0), SR))}).json()["id"]
+    before = [m for m in ndjson(client.get(f"/api/files/{file_id}/events", params={"start": -5}))
+              if m["type"] == "event"]
+    after = [m for m in ndjson(client.get(f"/api/files/{file_id}/events", params={"start": 1e6}))
+             if m["type"] == "event"]
+    assert before[0]["t"] == 1.0 and [e["t"] for e in after] == [3.0]
+
+
+def test_unknown_file_and_bad_upload():
+    client, _ = make_client()
+    r = client.get("/api/files/nope/events")
+    assert r.status_code == 404 and "Choose it again" in r.json()["detail"]
+    assert client.post("/api/files", files={"file": ("x.bin", b"not audio" * 50)}).status_code == 415
+
+
+def test_file_store_keeps_the_most_recently_used():
+    store = FileStore(max_files=2)
+    a, b = store.add("a", "A"), store.add("b", "B")
+    assert store.get(a) == ("a", "A")          # a is now the most recent
+    c = store.add("c", "C")                    # drops b, the least recently used
+    assert store.get(b) is None and store.get(a) and store.get(c)
+
+
+def test_leaving_a_file_stream_stops_the_analysis():
+    """Against a real uvicorn server: when the page abandons a stream (because the listener
+    skipped elsewhere), the single inference thread must be free again at once."""
+    model = load_model(fake_config(3, delay_seconds=0.2))
+    calls = []
+    predict = model._predict
+    model._predict = lambda audio: calls.append(1) or predict(audio)
+    app = create_app(engine=Engine(model=model, settings=SessionSettings(hop_seconds=0.5)))
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not server.started and time.monotonic() < deadline:
+            time.sleep(0.05)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        with httpx2.Client(base_url=f"http://127.0.0.1:{port}", timeout=10) as http:
+            data = wav_bytes(tone(model.class_frequency("c1"), 20.0), SR)   # 39 windows, about 8 s of model time
+            file_id = http.post("/api/files", files={"file": ("a.wav", data)}).json()["id"]
+            seen = 0
+            with http.stream("GET", f"/api/files/{file_id}/events") as r:
+                for line in r.iter_lines():
+                    seen += '"type": "event"' in line
+                    if seen == 2:
+                        break                   # leaving the block closes the connection
+            at_close = len(calls)
+            time.sleep(1.5)                     # 7 more windows if the analysis kept going
+            assert len(calls) <= at_close + 1   # only the inference already running may finish
+    finally:
+        server.should_exit = True
+        thread.join(timeout=5)
 
 
 # --- WS /ws/live ---------------------------------------------------------------------

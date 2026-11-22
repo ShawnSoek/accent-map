@@ -287,3 +287,59 @@ Short notes on each choice and why. Newest at the bottom.
   of playback.
 - **The benchmark joins all sample clips** (about 26 s), because the longest single clip
   (8.7 s) is shorter than a 10 s window. Default windows: 1, 2.5, 5, 7.5, 10 s.
+
+## 2026-11-22: File mode follows the playhead
+
+- **Problem:** the file was analyzed in one pass from the start. After a skip forward the page
+  said "N s behind", because the model first had to work through everything in between.
+- **Upload once, then analyze from any position.**
+  - `POST /api/files` decodes the file and returns an id, the duration and the update interval.
+    `GET /api/files/{id}/events?start=S` streams results from the last window ending at or
+    before S.
+  - `POST /api/analyze` (the whole file from 0) stays for scripts and curl.
+  - Windows are cut and numbered the same way in every pass, as in live mode, so the page caches
+    results by window number.
+  - The server keeps the last 4 files, decoded at 16 kHz (a 15 min file takes about 58 MB). An
+    older id gets "Unknown or expired file. Choose it again."
+- **After a skip, smoothing starts fresh.** The first result is the model's output for the full
+  10 s window there. The speech count runs from the start of the file, so a skip doesn't bring
+  back "Listening…".
+- **The server stops a pass when the page leaves it.** It checks for a disconnect before each
+  window; a test with real uvicorn confirms this. The inference already running can't be
+  interrupted: it finishes and its result is dropped. So the first result after a skip takes up
+  to 2 inferences: 1.8–3.6 s here.
+- **Results must reach the page before playback gets to them.** Each result is shown for one
+  update (+0.3 s) after its window ends.
+  - My first version started the new pass at the playhead. With 2.0 s updates and 1.8 s
+    inferences that pass gains only 0.2 s per update, so the map would have shown "Analyzing…"
+    for many seconds after each skip. The real-server check found this; the unit tests had not
+    let the playhead move while waiting.
+  - **Now, while playing:** a new pass starts at the first window that ends after the moment its
+    first result can arrive: the rest of the running inference plus one more, timed from the
+    events' `infer_ms`. Later results come faster than playback, so they stay ahead.
+  - **While paused:** the pass starts at the playhead, so the result for that moment appears
+    while paused.
+  - **Look-ahead:** while an already analyzed stretch plays, the page checks whether the running
+    pass will deliver the window after it in time. If not, it starts a new pass there at once.
+  - **No restart loops:** a pass still waiting for its first result is replaced only after a
+    seek or play. A pass that left out a window it couldn't finish in time is kept, unless a new
+    pass would fill the gap sooner.
+- **Verified:**
+  - **Unit tests, plus a playback simulation.** The simulation runs `logic.js` in QuickJS
+    against a simulated one-worker server, with 2.0 s/1.8 s, 2.25 s/1.8 s and 0.5 s/0.35 s
+    (update/inference).
+    - Each skip starts exactly one pass, and there are no gaps after the first result.
+    - The wait is at most 2 inferences + 1 update.
+    - With the look-ahead switched off, the same simulation has a 0.7–3.7 s gap, so the test
+      catches its loss.
+  - **The real server** (77.5 s file, 2.0 s updates, 1.75 s inferences), driven by the same
+    `logic.js` with a simulated playhead:
+    - After a skip ahead or back into an unanalyzed part, the map was back after 4.0 s, with no
+      gaps after that.
+    - A skip into a part analyzed earlier was seamless: the next pass started at once.
+    - Pausing exactly at the end of an analyzed stretch and pressing play left a 3.7 s gap,
+      because nothing can be ready sooner.
+  - Not yet checked in a real browser.
+- **Trade-off:** a pass runs to the end of the file, even over windows already cached. The page
+  ignores the duplicates. Stopping earlier would need an end position in the API; not worth it
+  yet.

@@ -3,8 +3,13 @@
   GET  /api/model    model info for the page: classes, map panels, caveats, update interval
   GET  /api/zones    the model's map zones (GeoJSON), if it has any
   WS   /ws/live      live microphone audio in, events out (protocol below)
-  POST /api/analyze  upload an audio file, events out as NDJSON (one JSON object per line)
-  GET  /             the web page (web/), once it exists
+  POST /api/files    upload an audio file once; the server keeps it (a few at most) -> {"id", ...}
+  GET  /api/files/{id}/events?start=S
+                     events from position S to the end, as NDJSON (one JSON object per line).
+                     The page asks again from a new S when the listener skips ahead; leaving
+                     the request stops that analysis.
+  POST /api/analyze  upload + events from the start in one call (handy with curl)
+  GET  /             the web page (web/)
 
 Live protocol:
   client -> {"type": "start", "sample_rate": 48000}
@@ -24,22 +29,25 @@ import io
 import json
 import logging
 import os
+import secrets
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.audio import StreamingResampler, decode_file
+from server.file_analysis import FileAnalysis
 from server.model_api import AccentModel, load_model
 from server.pacing import choose_update_interval, measure_inference_ms
 from server.paths import MODELS_DIR, REPO_ROOT
-from server.session import AnalysisSession, Event, Pending, SessionSettings
+from server.session import AnalysisSession, Pending, SessionSettings, WindowAnalyzer
 
 log = logging.getLogger("uvicorn.error")
 
@@ -49,6 +57,7 @@ MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_FILE_SECONDS = 15 * 60
 SAMPLE_RATE_RANGE = (8000, 192000)
 MAX_CHUNK_SECONDS = 2.0
+MAX_STORED_FILES = 4   # decoded audio kept for /api/files; 15 min is about 58 MB
 
 
 @dataclass
@@ -60,8 +69,30 @@ class Engine:
     executor: ThreadPoolExecutor = field(
         default_factory=lambda: ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference"))
 
-    async def analyze(self, session: AnalysisSession, pending: Pending) -> Event:
-        return await asyncio.get_running_loop().run_in_executor(self.executor, session.analyze, pending)
+    async def run(self, fn, *args):
+        """Run fn(*args) on the single inference thread."""
+        return await asyncio.get_running_loop().run_in_executor(self.executor, fn, *args)
+
+
+class FileStore:
+    """Uploaded files, decoded and cut into windows, least recently used dropped first."""
+
+    def __init__(self, max_files: int = MAX_STORED_FILES):
+        self.max_files = max_files
+        self._files: OrderedDict[str, tuple[str, FileAnalysis]] = OrderedDict()
+
+    def add(self, filename: str, analysis: FileAnalysis) -> str:
+        file_id = secrets.token_urlsafe(12)
+        self._files[file_id] = (filename, analysis)
+        while len(self._files) > self.max_files:
+            self._files.popitem(last=False)
+        return file_id
+
+    def get(self, file_id: str) -> tuple[str, FileAnalysis] | None:
+        if file_id in self._files:
+            self._files.move_to_end(file_id)
+            return self._files[file_id]
+        return None
 
 
 def build_engine(model_dir: str | Path, update_seconds: float | None = None) -> Engine:
@@ -120,7 +151,7 @@ class LiveStream:
             pending, ready = self.latest
             self.latest = None
             started = time.perf_counter()
-            event = await self.engine.analyze(self.session, pending)
+            event = await self.engine.run(self.session.analyze, pending)
             yield event, (started - ready) * 1000, (time.perf_counter() - ready) * 1000
 
 
@@ -154,9 +185,50 @@ def _ndjson(obj: dict) -> bytes:
     return (json.dumps(obj) + "\n").encode()
 
 
+async def _decode_upload(file: UploadFile, engine: Engine) -> FileAnalysis:
+    sr = engine.model.sample_rate
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "The uploaded file is empty.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // 2**20} MB).")
+    try:
+        audio = await asyncio.to_thread(decode_file, io.BytesIO(data), sr)
+    except Exception as err:  # soundfile raises several types for unreadable input
+        reason = getattr(err, "error_string", None) or type(err).__name__
+        raise HTTPException(415, f"Could not read this audio file ({reason}). Supported: WAV, FLAC, OGG, MP3. "
+                                 "Convert other formats (e.g. M4A) first.") from None
+    duration = len(audio) / sr
+    if duration > MAX_FILE_SECONDS:
+        raise HTTPException(413, f"Audio too long: {duration:.0f} s (max {MAX_FILE_SECONDS} s).")
+    if duration < engine.settings.min_audio_seconds:
+        raise HTTPException(422, f"Audio too short: {duration:.2f} s (need {engine.settings.min_audio_seconds} s).")
+    return await asyncio.to_thread(FileAnalysis, engine.model, engine.settings, audio)
+
+
+def _file_events(request: Request, engine: Engine, analysis: FileAnalysis, start: float,
+                 meta: dict) -> StreamingResponse:
+    """NDJSON: a meta line, one event per window from `start` to the end, then "done".
+    Stops as soon as the client goes away; at most the inference already running finishes."""
+
+    async def lines():
+        yield _ndjson({"type": "meta", "start": start, **meta})
+        analyzer = WindowAnalyzer(engine.model, engine.settings)   # fresh smoothing per pass
+        count = 0
+        for pending in analysis.pendings_from(start):
+            if await request.is_disconnected():
+                return
+            event = await engine.run(analyzer.analyze, pending)
+            count += 1
+            yield _ndjson({"type": "event", **event.to_dict()})
+        yield _ndjson({"type": "done", "events": count})
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
 def create_app(engine: Engine | None = None, model_dir: str | Path | None = None,
                update_seconds: float | None = None) -> FastAPI:
-    """Without `engine`, the model is loaded and timed at startup (about 10 s)."""
+    """Without `engine`, the model is loaded and timed at startup (about 15 s)."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -208,44 +280,34 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
             raise HTTPException(404, "This model has no map zones.")
         return FileResponse(c.model_dir / c.map.zones_file, media_type="application/geo+json")
 
+    store = FileStore()
+    app.state.files = store
+
+    def file_meta(filename: str, analysis: FileAnalysis) -> dict:
+        times = analysis.window_times
+        return {"filename": filename, "duration": analysis.duration,
+                "update_seconds": app.state.engine.settings.hop_seconds,
+                "first_t": times[0] if times else None, "windows": len(times)}
+
+    @app.post("/api/files")
+    async def upload_file(file: UploadFile) -> dict:
+        analysis = await _decode_upload(file, app.state.engine)
+        file_id = store.add(file.filename or "audio", analysis)
+        return {"id": file_id, **file_meta(file.filename or "audio", analysis)}
+
+    @app.get("/api/files/{file_id}/events")
+    async def file_events(file_id: str, request: Request, start: float = 0.0) -> StreamingResponse:
+        entry = store.get(file_id)
+        if entry is None:
+            raise HTTPException(404, "Unknown or expired file. Choose it again.")
+        filename, analysis = entry
+        start = min(max(start, 0.0), analysis.duration)
+        return _file_events(request, app.state.engine, analysis, start, file_meta(filename, analysis))
+
     @app.post("/api/analyze")
-    async def analyze_file(file: UploadFile) -> StreamingResponse:
-        e = app.state.engine
-        sr = e.model.sample_rate
-        data = await file.read(MAX_UPLOAD_BYTES + 1)
-        if not data:
-            raise HTTPException(400, "The uploaded file is empty.")
-        if len(data) > MAX_UPLOAD_BYTES:
-            raise HTTPException(413, f"File too large (max {MAX_UPLOAD_BYTES // 2**20} MB).")
-        try:
-            audio = await asyncio.to_thread(decode_file, io.BytesIO(data), sr)
-        except Exception as err:  # soundfile raises several types for unreadable input
-            reason = getattr(err, "error_string", None) or type(err).__name__
-            raise HTTPException(415, f"Could not read this audio file ({reason}). Supported: WAV, FLAC, OGG, MP3. "
-                                     "Convert other formats (e.g. M4A) first.") from None
-        duration = len(audio) / sr
-        if duration > MAX_FILE_SECONDS:
-            raise HTTPException(413, f"Audio too long: {duration:.0f} s (max {MAX_FILE_SECONDS} s).")
-        if duration < e.settings.min_audio_seconds:
-            raise HTTPException(422, f"Audio too short: {duration:.2f} s (need {e.settings.min_audio_seconds} s).")
-
-        session = AnalysisSession(e.model, e.settings)
-        hop = round(e.settings.hop_seconds * sr)
-
-        async def lines():
-            yield _ndjson({"type": "meta", "filename": file.filename, "duration": duration,
-                           "update_seconds": e.settings.hop_seconds})
-            count = 0
-            for i in range(0, len(audio), hop):   # push one hop at a time to keep memory flat
-                for pending in session.push(audio[i:i + hop]):
-                    count += 1
-                    yield _ndjson({"type": "event", **(await e.analyze(session, pending)).to_dict()})
-            for pending in session.flush():
-                count += 1
-                yield _ndjson({"type": "event", **(await e.analyze(session, pending)).to_dict()})
-            yield _ndjson({"type": "done", "events": count})
-
-        return StreamingResponse(lines(), media_type="application/x-ndjson")
+    async def analyze_file(file: UploadFile, request: Request) -> StreamingResponse:
+        analysis = await _decode_upload(file, app.state.engine)
+        return _file_events(request, app.state.engine, analysis, 0.0, file_meta(file.filename, analysis))
 
     @app.websocket("/ws/live")
     async def live(ws: WebSocket) -> None:

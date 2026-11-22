@@ -42,6 +42,8 @@
     }
     render(null);
     $("mic-button").addEventListener("click", function () { if (live) stopLive(); else startLive(); });
+    $("player").addEventListener("seeked", onPlayerMoved);
+    $("player").addEventListener("play", onPlayerMoved);
     $("file-input").addEventListener("change", function (e) {
       var f = e.target.files[0];
       e.target.value = "";          // allow choosing the same file again
@@ -272,60 +274,123 @@
     return "Could not start the microphone: " + err.message;
   }
 
-  // ---- File: analyze on the server, show results in sync with playback ----------------
+  // ---- File: upload once, analyze from the playhead, show results in sync with playback ---
+  // The server analyzes forward from a start position. Results are cached by window, so parts
+  // already analyzed show at once. When the listener skips to a part that is not analyzed and
+  // the running pass will not get there in time, the page abandons that pass (the server then
+  // stops it) and asks for a new one, a little ahead of the playhead while playing, so results
+  // are ready when playback reaches them (logic.js newPass, needsRestart).
 
   async function startFile(f) {
     stopFile();
     showError("");
     var player = $("player");
-    var current = { events: [], done: false, duration: null, controller: new AbortController(),
-      url: URL.createObjectURL(f), name: f.name, frame: 0 };
+    var current = { id: null, name: f.name, url: URL.createObjectURL(f), file: null, events: [],
+      stream: null, inference: null, frame: 0, hint: undefined, lastCheck: 0 };
     job = current;
     player.src = current.url;
     player.hidden = false;
-    render(null, "Press play. The map follows the audio as it plays.");
-    setDetails("Analyzing " + f.name + "…");
-    current.frame = requestAnimationFrame(tick);
+    render(null, "Uploading " + f.name + "…");
     try {
       var body = new FormData();
       body.append("file", f, f.name);
-      var res = await fetch("/api/analyze", { method: "POST", body: body, signal: current.controller.signal });
+      var res = await fetch("/api/files", { method: "POST", body: body });
       if (!res.ok) throw new Error(await errorDetail(res));
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var parser = L.ndjsonParser();
-      for (;;) {
-        var chunk = await reader.read();
-        var messages = chunk.done ? parser.end() : parser.push(decoder.decode(chunk.value, { stream: true }));
-        messages.forEach(function (m) { onFileMessage(current, m); });
-        if (chunk.done) break;
-      }
+      var meta = await res.json();
+      if (job !== current) return;                  // another file was chosen meanwhile
+      current.id = meta.id;
+      current.file = { first_t: meta.first_t, hop: meta.update_seconds, duration: meta.duration,
+        windows: meta.windows };
+      startStream(current);
+      current.frame = requestAnimationFrame(tick);
     } catch (err) {
-      if (err.name !== "AbortError" && job === current) {
+      if (job === current) {
         showError(err.message);
+        render(null);
         setDetails("");
       }
     }
   }
 
-  function onFileMessage(current, m) {
-    if (m.type === "meta") current.duration = m.duration;
-    else if (m.type === "event") current.events.push(m);
-    else if (m.type === "done") current.done = true;
-    var analyzed = current.events.length ? current.events[current.events.length - 1].t : 0;
-    setDetails(current.done ? "Analysis of " + current.name + " complete (" + current.events.length + " updates)."
-      : "Analyzing " + current.name + "… " + analyzed.toFixed(1) + " of " + (current.duration || 0).toFixed(1) + " s");
+  // What logic.js needs to know about playback right now.
+  function view(current, seeked) {
+    var player = $("player");
+    return { time: player.currentTime, playing: !player.paused, now: performance.now() / 1000,
+      infer: current.inference ? current.inference.seconds : current.file.hop / 1.2, seeked: !!seeked };
+  }
+
+  function startStream(current) {
+    var stream = L.newPass(current.file, current.stream, view(current), current.events);
+    if (current.stream) current.stream.controller.abort();
+    stream.controller = new AbortController();
+    current.stream = stream;
+    updateFileDetails(current);
+    readStream(current, stream).catch(function (err) {
+      if (err.name !== "AbortError" && job === current) showError(err.message);
+    });
+  }
+
+  async function readStream(current, stream) {
+    var url = "/api/files/" + encodeURIComponent(current.id) + "/events?start=" + stream.start.toFixed(2);
+    var res = await fetch(url, { signal: stream.controller.signal });
+    if (!res.ok) throw new Error(await errorDetail(res));
+    var reader = res.body.getReader();
+    var decoder = new TextDecoder();
+    var parser = L.ndjsonParser();
+    for (;;) {
+      var chunk = await reader.read();
+      var messages = chunk.done ? parser.end() : parser.push(decoder.decode(chunk.value, { stream: true }));
+      messages.forEach(function (m) {
+        if (m.type === "event") {
+          L.insertEvent(current.events, m);
+          L.passResult(stream, m, performance.now() / 1000);
+          current.inference = L.noteInference(current.inference, m);
+        } else if (m.type === "done") {
+          stream.done = true;
+        }
+      });
+      if (messages.length) updateFileDetails(current);
+      if (chunk.done) break;
+    }
+    stream.done = true;
+    updateFileDetails(current);
+  }
+
+  function updateFileDetails(current) {
+    if (job !== current || !current.file) return;
+    var s = current.stream;
+    setDetails(current.name + ": " + current.events.length + " of " + current.file.windows + " updates ready · " +
+      (s && !s.done ? "analyzing from " + L.clock(s.got ? s.first : s.start) : "analysis idle") +
+      " · one update every " + current.file.hop + " s");
+  }
+
+  function checkCoverage(current, seeked) {
+    if (!current.file) return;
+    if (L.needsRestart(current.events, current.file, current.stream, view(current, seeked))) startStream(current);
+  }
+
+  function onPlayerMoved() {
+    if (job) checkCoverage(job, true);
   }
 
   function tick() {
     var current = job;
     if (!current) return;
     var player = $("player");
-    var event = L.eventAt(current.events, player.currentTime);
-    var analyzed = current.events.length ? current.events[current.events.length - 1].t : 0;
-    var behind = !current.done && !player.paused && player.currentTime - analyzed > info.audio.update_seconds + 0.5;
-    var hint = behind ? "Analysis is " + (player.currentTime - analyzed).toFixed(1) + " s behind playback. Pause to let it catch up."
-      : event ? null : player.paused ? "Press play. The map follows the audio as it plays." : "Listening…";
+    var now = performance.now();
+    if (!player.paused && now - current.lastCheck > 250) {
+      current.lastCheck = now;
+      checkCoverage(current);
+    }
+    var t = player.currentTime;
+    var event = L.freshEventAt(current.events, t, current.file.hop);
+    var hint = null;
+    if (!event) {
+      var s = current.stream;
+      hint = t < current.file.first_t
+        ? (player.paused ? "Press play. The map follows the audio as it plays." : "Listening…")
+        : "Analyzing this part…" + (s && s.got && s.first > t ? " The map continues at " + L.clock(s.first) + "." : "");
+    }
     if (event !== shown || hint !== current.hint) {
       current.hint = hint;
       render(event, hint);
@@ -337,7 +402,7 @@
     var current = job;
     if (!current) return;
     job = null;
-    current.controller.abort();
+    if (current.stream) current.stream.controller.abort();
     cancelAnimationFrame(current.frame);
     var player = $("player");
     player.pause();

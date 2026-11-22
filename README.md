@@ -48,7 +48,11 @@ The extra index is where the pinned `torch==2.11.0+cpu` and `torchaudio==2.11.0+
 - **Start microphone**, allow access, and speak Spanish. The level bar shows that sound is
   arriving.
 - **Analyze a file…** accepts WAV, FLAC, OGG and MP3, but not M4A/AAC: convert those first.
-  Press play, and the map follows the audio as it plays. Seeking works too.
+  Press play, and the map follows the audio as it plays.
+  - The model analyzes the part you are listening to. Parts it has already analyzed show at once.
+  - After you skip to a new part, the map says "Analyzing this part…" for about 4 s (2–6 s) on
+    the laptop below, then follows the audio again. Paused, the result for the new position
+    appears after about 2–4 s.
 
 The map colours each zone by how likely it is, smoothed over about 1.5 s so it moves instead
 of flickering. The model looks at the last 10 s of audio, so each result rests on several

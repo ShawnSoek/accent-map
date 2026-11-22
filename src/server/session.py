@@ -1,9 +1,10 @@
-"""One analysis session: audio in, a stream of display events out.
+"""Analysis sessions: audio in, a stream of display events out.
 
-Live (microphone) and file mode both use this class. Live mode pushes small chunks
-as they arrive and may skip windows when the model is busy (the server decides
-that); file mode pushes the whole file and analyzes every window. For the same
-audio and the same analyzed windows, both give identical events.
+AnalysisSession serves the live (microphone) path: small chunks are pushed as they
+arrive, and the server may skip windows when the model is busy. File mode
+(server/file_analysis.py) cuts the file with the same AnalysisSession.push logic, so
+both modes see identical windows, and both turn windows into events with
+WindowAnalyzer.
 
 Pipeline per window:
   energy gate -> model.predict -> Smoother -> status -> Event
@@ -79,24 +80,15 @@ def decide_status(smoothed: np.ndarray, speech_total: float, s: SessionSettings)
     return UNCERTAIN
 
 
-class AnalysisSession:
+class WindowAnalyzer:
+    """Window -> Event: energy gate, model, smoothing, status. Owns the smoother, so use one
+    per stream of events (a live session, or one pass through a file from some position)."""
+
     def __init__(self, model: AccentModel, settings: SessionSettings):
         self.model = model
         self.settings = settings
         self.class_ids = model.class_ids
-        self.windower = Windower(model.sample_rate, settings.window_seconds,
-                                 settings.hop_seconds, settings.min_audio_seconds)
         self.smoother = Smoother(settings.tau_seconds)
-        self.speech_total = 0.0
-
-    def push(self, audio: np.ndarray) -> list[Pending]:
-        """Add audio at the model's sample rate; return windows ready for analysis."""
-        return [self._pending(w) for w in self.windower.push(audio)]
-
-    def flush(self) -> list[Pending]:
-        """End of stream: a last window covering any audio after the final hop."""
-        w = self.windower.flush()
-        return [] if w is None else [self._pending(w)]
 
     def analyze(self, pending: Pending) -> Event:
         s, w = self.settings, pending.window
@@ -123,15 +115,6 @@ class AnalysisSession:
             infer_ms=infer_ms,
         )
 
-    def analyze_all(self, audio: np.ndarray):
-        """File mode: every window of `audio`, then the final partial one."""
-        for pending in self.push(audio) + self.flush():
-            yield self.analyze(pending)
-
-    def _pending(self, w: Window) -> Pending:
-        self.speech_total += voiced_seconds(w.new_audio, self.model.sample_rate, self.settings.gate_dbfs)
-        return Pending(window=w, speech_total=self.speech_total)
-
     def _as_dict(self, probs: np.ndarray | None) -> dict[str, float] | None:
         return None if probs is None else dict(zip(self.class_ids, probs.tolist()))
 
@@ -140,3 +123,37 @@ class AnalysisSession:
             return []
         order = np.argsort(-probs, kind="stable")[: self.settings.top_k]
         return [{"id": self.class_ids[i], "p": float(probs[i])} for i in order]
+
+
+class AnalysisSession:
+    """A stream of audio in arrival order (the live path): windows, speech totals, analysis."""
+
+    def __init__(self, model: AccentModel, settings: SessionSettings):
+        self.model = model
+        self.settings = settings
+        self.class_ids = model.class_ids
+        self.windower = Windower(model.sample_rate, settings.window_seconds,
+                                 settings.hop_seconds, settings.min_audio_seconds)
+        self.analyzer = WindowAnalyzer(model, settings)
+        self.speech_total = 0.0
+
+    def push(self, audio: np.ndarray) -> list[Pending]:
+        """Add audio at the model's sample rate; return windows ready for analysis."""
+        return [self._pending(w) for w in self.windower.push(audio)]
+
+    def flush(self) -> list[Pending]:
+        """End of stream: a last window covering any audio after the final hop."""
+        w = self.windower.flush()
+        return [] if w is None else [self._pending(w)]
+
+    def analyze(self, pending: Pending) -> Event:
+        return self.analyzer.analyze(pending)
+
+    def analyze_all(self, audio: np.ndarray):
+        """Every window of `audio`, then the final partial one."""
+        for pending in self.push(audio) + self.flush():
+            yield self.analyze(pending)
+
+    def _pending(self, w: Window) -> Pending:
+        self.speech_total += voiced_seconds(w.new_audio, self.model.sample_rate, self.settings.gate_dbfs)
+        return Pending(window=w, speech_total=self.speech_total)
