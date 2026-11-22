@@ -339,7 +339,8 @@ Short notes on each choice and why. Newest at the bottom.
     - A skip into a part analyzed earlier was seamless: the next pass started at once.
     - Pausing exactly at the end of an analyzed stretch and pressing play left a 3.7 s gap,
       because nothing can be ready sooner.
-  - Not yet checked in a real browser.
+  - In a real browser (user, 2026-11-22): a skip ahead while playing, a skip back to an analyzed
+    part, and a skip while paused all worked as described, with no flicker and no long waits.
 - **Trade-off:** a pass runs to the end of the file, even over windows already cached. The page
   ignores the duplicates. Stopping earlier would need an end position in the API; not worth it
   yet.
