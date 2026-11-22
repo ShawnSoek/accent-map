@@ -135,7 +135,7 @@ def meta(folder: Path, user: str) -> None:
     (job / "kernel-metadata.json").write_text(json.dumps({
         "id": f"{user}/{kernel}", "title": kernel, "code_file": "run.py", "language": "python",
         "kernel_type": "script", "is_private": "true", "enable_gpu": "true", "enable_tpu": "false",
-        "enable_internet": "true", "dataset_sources": [dataset], "competition_sources": [],
+        "enable_internet": "true", "machine_shape": "", "dataset_sources": [dataset], "competition_sources": [],
         "kernel_sources": [], "model_sources": []}, indent=1))
     print(f"dataset {dataset} (private), kernel {user}/{kernel}; files in {out / 'upload'} and {job}")
 
