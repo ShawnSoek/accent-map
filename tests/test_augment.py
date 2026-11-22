@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import soundfile as sf
 
+from fakes import make_noise_folder
 from training.augment import (LIMIT, NoiseBank, Plan, add_noise, add_reverb, apply, load_augment_spec, plan_for,
                               speech_rms)
 
@@ -20,34 +20,7 @@ def tone(freq, seconds=1.0, amp=0.1):
 
 @pytest.fixture
 def bank(tmp_path):
-    """A tiny RIRS_NOISES folder with the real layout and list-file format."""
-    base = tmp_path / "RIRS_NOISES"
-    rng = np.random.default_rng(0)
-
-    def wav(rel, data, channels=1):
-        path = tmp_path / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        sf.write(path, np.repeat(data[:, None], channels, axis=1) if channels > 1 else data, SR)
-        return rel
-
-    real = [wav(f"RIRS_NOISES/real_rirs_isotropic_noises/r{i}.wav", np.r_[np.zeros(50), 1, 0.3 * rng.random(400)],
-                channels=8) for i in range(3)]
-    (base / "real_rirs_isotropic_noises/rir_list").write_text(
-        "".join(f"--rir-id {i} --room-id room1 {p}\n" for i, p in enumerate(real)))
-    iso = wav("RIRS_NOISES/real_rirs_isotropic_noises/n0.wav", 0.05 * rng.standard_normal(3 * SR), channels=8)
-    (base / "real_rirs_isotropic_noises/noise_list").write_text(
-        f"--noise-id 1 --noise-type isotropic --room-linkage room1 {iso}\n")
-    point = []
-    for i, kind in enumerate(["background", "foreground", "foreground"]):
-        point.append((kind, wav(f"RIRS_NOISES/pointsource_noises/p{i}.wav", 0.1 * rng.standard_normal(SR // 2))))
-    point.append(("foreground", wav("RIRS_NOISES/pointsource_noises/click.wav", 0.1 * rng.standard_normal(400))))
-    (base / "pointsource_noises/noise_list").write_text(
-        "".join(f"--noise-id p{i} --noise-type point-source --bg-fg-type {k} {p}\n" for i, (k, p) in enumerate(point)))
-    for room in ("smallroom", "mediumroom"):
-        sims = [wav(f"RIRS_NOISES/simulated_rirs/{room}/Room001/R-{i}.wav", np.r_[np.zeros(10), 1, 0.2 * rng.random(200)])
-                for i in range(4)]
-        (base / f"simulated_rirs/{room}/rir_list").write_text(
-            "".join(f"--rir-id {room}{i} --room-id {room}1 {p}\n" for i, p in enumerate(sims)))
+    make_noise_folder(tmp_path)
     return NoiseBank(tmp_path, ["smallroom", "mediumroom"])
 
 
