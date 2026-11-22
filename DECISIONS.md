@@ -344,3 +344,51 @@ Short notes on each choice and why. Newest at the bottom.
 - **Trade-off:** a pass runs to the end of the file, even over windows already cached. The page
   ignores the duplicates. Stopping earlier would need an end position in the API; not worth it
   yet.
+
+## 2026-11-22: Stage 2, step 1: what Common Voice Spanish contains
+
+- **All work on our own model is on the branch `stage2-own-model`** (the user's wish), not on main.
+- **Data:** Common Voice 27.0 Spanish (`cv-corpus-27.0-2026-09-11-es.tar.gz`, 51.9 GB). The user
+  downloaded it from Mozilla Data Collective, the only source since October 2025, and put it in
+  `data/commonvoice/` (not committed). SHA-256
+  `b7c1f303ebe3c4a637afdd3d31c5aaa3da131a893ce77169db182068f342e4c1`, computed by us. Mozilla
+  showed no checksum to compare it with.
+- **Reading the archive safely:** `scripts/cv_extract.py` reads it in one pass of about 4.5 min.
+  - It computes the checksum and lists all 1,683,749 members.
+  - It extracts only the 11 metadata files: TSV tables and release notes.
+  - Only regular files with safe paths are written. Links, absolute paths and ".." are refused,
+    which a test checks.
+  - Audio is extracted later, and only the clips we need.
+  - Scripts that read the downloaded files run with `python -I`.
+- **Counting:** `scripts/cv_inventory.py` counts only validated clips (440,794 rows). The
+  release's own README counts all 1.68 million clips, including 1.15 million that nobody has
+  validated yet.
+  - A speaker is one `client_id`. A speaker counts for an accent only if every labelled clip
+    names that one accent: 4,328 speakers (296,643 clips).
+  - 69 speakers named several accents (678 clips), and 13,291 named none (143,473 clips).
+  - The inventory prints no speaker ids, and its JSON stays in `data/`.
+- **The 10 regional accents** (validated clips, one-accent speakers):
+
+  | Accent | Speakers | Hours | h, ≤ 50 clips/speaker | Top speaker's share |
+  |---|---|---|---|---|
+  | México | 1,083 | 194.3 | 27.5 | 8 % |
+  | Andino-Pacífico | 693 | 26.3 | 15.3 | 12 % |
+  | España: Norte peninsular | 463 | 57.9 | 11.1 | 47 % |
+  | Caribe | 419 | 15.8 | 8.8 | 14 % |
+  | Rioplatense | 415 | 20.5 | 9.2 | 22 % |
+  | España: Centro-Sur peninsular | 348 | 15.9 | 8.9 | 10 % |
+  | América central | 287 | 10.8 | 6.4 | 9 % |
+  | Chileno | 216 | 8.6 | 4.7 | 15 % |
+  | España: Sur peninsular | 186 | 58.1 | 5.2 | 83 % |
+  | España: Islas Canarias | 167 | 3.9 | 2.5 | 21 % |
+
+  - The 11th option, "Español de Filipinas", has 3 speakers. 42 free-text labels have 1–3
+    speakers each (for example "España: Catalunya").
+- **What this means:**
+  - Every regional accent has enough speakers for a speaker-disjoint test set.
+  - Raw hours are dominated by a few speakers. In southern Spain one speaker made 83 % of the
+    clips, so we must cap clips per speaker.
+  - With a cap of 50, the usable audio is about 100 h, from 2.5 h (Canaries) to 27.5 h (Mexico).
+  - Clips are short: 4.8–5.6 s on average.
+  - Labelled speakers are mostly male (roughly 70 %, where gender is given), so results should
+    also be reported by gender.
