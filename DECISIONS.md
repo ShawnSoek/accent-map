@@ -392,3 +392,50 @@ Short notes on each choice and why. Newest at the bottom.
   - Clips are short: 4.8–5.6 s on average.
   - Labelled speakers are mostly male (roughly 70 %, where gender is given), so results should
     also be reported by gender.
+
+## 2026-11-22: Stage 2, step 2: speaker-disjoint split (10 accents)
+
+- **The user's choices:** the 10 regional accents, at most 50 clips per speaker, and validated
+  clips only.
+  - Left out: "Español de Filipinas" (3 speakers), the free-text accents, and speakers who
+    named several accents.
+- **The settings are in `training/cv27_es10/dataset.yaml`** (committed). The spec pins the
+  archive's SHA-256, and `scripts/cv_split.py` refuses to run if the extracted data came from a
+  different archive.
+- **Rules,** for each accent separately:
+  - Test and dev speakers come only from speakers with at least 5 clips (about 25 s), so each
+    can fill at least two 10 s test windows.
+  - Test takes 15 % of those speakers (at least 20), dev 10 % (at least 10). Fractions give
+    the big classes more reliable numbers, and the minimums keep the small ones testable.
+  - Every other speaker trains, and each speaker counts for at most 50 clips.
+  - "Random" means ordered by SHA-256 of a fixed seed and the speaker id (or clip name). The
+    split is the same on every run whatever the row order, which a test checks.
+- **Sentences are kept out of training too.** A training clip whose sentence is also read in dev
+  or test is dropped before the cap.
+  - Without this, a model could score on test by recognizing sentence content instead of the
+    accent.
+  - Cost: 2.8 h of training audio (73.4 h instead of 76.2 h). 175 training speakers read
+    only held-out sentences and drop out entirely.
+  - The script checks that no speaker, and no held-out sentence, is in training.
+- **Result** (speakers / hours):
+
+  | Class | Train | Dev | Test (f/m) |
+  |---|---|---|---|
+  | es_north | 378 / 8.0 | 30 / 1.2 | 46 / 1.5 (9/34) |
+  | es_centre_south | 278 / 6.7 | 25 / 0.8 | 37 / 1.1 (7/29) |
+  | es_south | 145 / 3.8 | 14 / 0.4 | 22 / 0.7 (7/15) |
+  | es_canary | 137 / 1.7 | 10 / 0.2 | 20 / 0.5 (7/12) |
+  | mexico | 850 / 20.5 | 73 / 2.2 | 110 / 4.2 (34/72) |
+  | central_america | 226 / 4.9 | 19 / 0.5 | 28 / 0.8 (12/15) |
+  | caribbean | 336 / 6.3 | 26 / 0.8 | 39 / 1.4 (12/24) |
+  | andean_pacific | 546 / 11.2 | 44 / 1.5 | 66 / 2.2 (16/48) |
+  | rioplatense | 320 / 6.6 | 29 / 0.9 | 43 / 1.4 (14/26) |
+  | chilean | 168 / 3.6 | 15 / 0.4 | 22 / 0.6 (5/15) |
+  | total | 3,384 / 73.4 | 285 / 9.1 | 433 / 14.3 |
+
+  - Test gender: f/m counts only speakers who gave a gender.
+  - Training data is uneven: 20.5 h for Mexico against 1.7 h for the Canaries. Training will
+    need class-balanced sampling or loss weights.
+- **The lists stay in `data/commonvoice/splits/cv27_es10/`** (not committed), because they hold
+  speaker ids. The Common Voice terms forbid sharing the data. The spec plus the script remake
+  them exactly.
