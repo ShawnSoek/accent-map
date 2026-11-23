@@ -70,7 +70,12 @@ it times one update and picks a slower interval if needed.
 - On an 8-core laptop CPU (Ryzen 7 7730U), one update of the 10 s window takes about 1.6 s. The
   server picks 2.0 s, or a little more if the computer was busy during that startup measurement.
 - The map then reacts about 1.7 s after you speak.
-- The startup log prints the interval it chose. `--update-seconds 2.0` fixes it.
+- The computer can be slower later than at startup, for example with the browser playing and
+  other programs busy. The server keeps timing the model, and each new file or microphone
+  session gets an interval that fits. If a file that is playing falls behind, the page asks for
+  a longer interval for it once and continues. The map keeps the earlier results meanwhile.
+- The startup log prints the interval it chose, and each change. `--update-seconds 2.0` fixes
+  the interval.
 
 ## What the stage-1 model can and can't do
 
@@ -150,6 +155,10 @@ between training and test. It covers all ten Common Voice accent zones:
 - **Killed while loading, or out of memory.** Loading needs about 2.8 GB of RAM. On WSL2, raise
   the limit with `memory=8GB` under `[wsl2]` in `%UserProfile%\.wslconfig`, then run `wsl --shutdown`.
 - **Updates are slow.** That's the CPU. `--update-seconds 2` forces a slower, steady pace.
+- **"Analyzing this part…" keeps coming back while a file plays.** The computer is slower than
+  the interval allows. The page should fix this itself within a few seconds by asking for a
+  longer interval (see the details line under the player). If not, restart the server with
+  a larger `--update-seconds`.
 
 ## Development
 

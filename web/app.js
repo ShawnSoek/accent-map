@@ -280,13 +280,17 @@
   // the running pass will not get there in time, the page abandons that pass (the server then
   // stops it) and asks for a new one, a little ahead of the playhead while playing, so results
   // are ready when playback reaches them (logic.js newPass, needsRestart).
+  // All this needs one inference per update to be faster than playback. When the computer is
+  // slower than the server measured at startup, the page asks the server to cut the file again
+  // with a longer interval (recut) and keeps showing the earlier results until new ones come.
 
   async function startFile(f) {
     stopFile();
     showError("");
     var player = $("player");
     var current = { id: null, name: f.name, url: URL.createObjectURL(f), file: null, events: [],
-      stream: null, inference: null, frame: 0, hint: undefined, lastCheck: 0 };
+      stream: null, inference: null, recent: [], recutting: false, previous: null, frame: 0, hint: undefined,
+      lastCheck: 0 };
     job = current;
     player.src = current.url;
     player.hidden = false;
@@ -331,7 +335,8 @@
   }
 
   async function readStream(current, stream) {
-    var url = "/api/files/" + encodeURIComponent(current.id) + "/events?start=" + stream.start.toFixed(2);
+    var fileId = current.id;
+    var url = "/api/files/" + encodeURIComponent(fileId) + "/events?start=" + stream.start.toFixed(2);
     var res = await fetch(url, { signal: stream.controller.signal });
     if (!res.ok) throw new Error(await errorDetail(res));
     var reader = res.body.getReader();
@@ -341,10 +346,12 @@
       var chunk = await reader.read();
       var messages = chunk.done ? parser.end() : parser.push(decoder.decode(chunk.value, { stream: true }));
       messages.forEach(function (m) {
+        if (current.id !== fileId) return;                // the file was cut again: other windows
         if (m.type === "event") {
           L.insertEvent(current.events, m);
           L.passResult(stream, m, performance.now() / 1000);
           current.inference = L.noteInference(current.inference, m);
+          current.recent = L.noteRecent(current.recent, m, info.audio.window_seconds);
         } else if (m.type === "done") {
           stream.done = true;
         }
@@ -365,8 +372,33 @@
   }
 
   function checkCoverage(current, seeked) {
-    if (!current.file) return;
+    if (!current.file || current.recutting) return;
+    if (L.slowerThanPlayback(current.recent, current.file.hop)) { recut(current); return; }
     if (L.needsRestart(current.events, current.file, current.stream, view(current, seeked))) startStream(current);
+  }
+
+  // Full windows take about as long as the file's interval: results would keep falling behind
+  // playback. Ask the server to cut the file again with the interval it sustains now, then
+  // continue from the playhead. If it keeps the interval, ask again only after 3 new results.
+  async function recut(current) {
+    current.recutting = true;
+    current.recent = [];
+    try {
+      var res = await fetch("/api/files/" + encodeURIComponent(current.id) + "/recut", { method: "POST" });
+      if (!res.ok) throw new Error(await errorDetail(res));
+      var meta = await res.json();
+      if (job !== current || meta.id === current.id) return;
+      current.previous = { events: current.events, hop: current.file.hop };   // shown until new results come
+      current.id = meta.id;
+      current.file = { first_t: meta.first_t, hop: meta.update_seconds, duration: meta.duration,
+        windows: meta.windows };
+      current.events = [];
+      startStream(current);                              // aborts the old pass
+    } catch (err) {
+      if (job === current) showError(err.message);
+    } finally {
+      current.recutting = false;
+    }
   }
 
   function onPlayerMoved() {
@@ -383,7 +415,8 @@
       checkCoverage(current);
     }
     var t = player.currentTime;
-    var event = L.freshEventAt(current.events, t, current.file.hop);
+    var event = L.freshEventAt(current.events, t, current.file.hop) ||
+      (current.previous ? L.freshEventAt(current.previous.events, t, current.previous.hop) : null);
     var hint = null;
     if (!event) {
       var s = current.stream;

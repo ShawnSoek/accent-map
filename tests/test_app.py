@@ -142,6 +142,70 @@ def test_upload_once_then_events_from_any_position():
     assert later[-1] == {"type": "done", "events": len(events)}
 
 
+
+# --- The update interval follows the machine's real speed -----------------------------
+
+def slow_event(window_seconds=5.0, infer_ms=1500.0):
+    from server.session import Event
+    return Event(index=0, t=window_seconds, window_seconds=window_seconds, status="uncertain", raw=None,
+                 smoothed=None, top=[], speech_seconds=1.0, infer_ms=infer_ms)
+
+
+def adaptive_client(measured_ms=100.0):
+    """As started by serve.py: the interval was measured at startup (so it may adapt)."""
+    model = load_model(fake_config(4))
+    engine = Engine(model=model, settings=SessionSettings(hop_seconds=0.5), measured_infer_ms=measured_ms)
+    return TestClient(create_app(engine=engine)), model, engine
+
+
+def test_interval_follows_the_recent_full_windows():
+    _, _, engine = adaptive_client()
+    assert engine.current_settings().hop_seconds == 0.5
+    for _ in range(5):
+        engine.note(slow_event(window_seconds=1.5))            # under 40 % of the 5 s window: not counted
+    engine.note(slow_event(infer_ms=None))                      # no speech: the model did not run
+    assert engine.current_settings().hop_seconds == 0.5
+    for ms in (1400, 9000):
+        engine.note(slow_event(infer_ms=ms))
+    engine.note(slow_event(window_seconds=2.5, infer_ms=750))   # half a window: counts as 1500 ms
+    assert list(engine.recent_ms) == [1400, 9000, 1500]
+    assert engine.current_settings().hop_seconds == 2.0          # median 1.5 s * 1.2 -> 2.0 s
+    for ms in (300, 300, 300):
+        engine.note(slow_event(infer_ms=ms))
+    assert engine.current_settings().hop_seconds == 0.5          # faster again
+    fixed = Engine(model=engine.model, settings=SessionSettings(hop_seconds=0.5))   # forced: never changes
+    for _ in range(3):
+        fixed.note(slow_event())
+    assert fixed.current_settings().hop_seconds == 0.5
+
+
+def test_recut_gives_a_file_a_longer_interval():
+    client, model, engine = adaptive_client()
+    data = wav_bytes(tone(model.class_frequency("c1"), 12.0), SR)
+    info = client.post("/api/files", files={"file": ("a.wav", data)}).json()
+    assert info["update_seconds"] == 0.5
+    same = client.post(f"/api/files/{info['id']}/recut").json()
+    assert same["id"] == info["id"] and same["update_seconds"] == 0.5    # nothing slow measured: unchanged
+    for _ in range(3):
+        engine.note(slow_event())
+    recut = client.post(f"/api/files/{info['id']}/recut").json()
+    assert recut["id"] != info["id"] and recut["update_seconds"] == 2.0 and recut["duration"] == 12.0
+    assert client.get("/api/model").json()["audio"]["update_seconds"] == 2.0     # new files and sessions too
+    times = [m["t"] for m in ndjson(client.get(f"/api/files/{recut['id']}/events")) if m["type"] == "event"]
+    assert times[-1] == 12.0 and all(b - a == pytest.approx(2.0) for a, b in zip(times, times[1:]))
+    old = [m for m in ndjson(client.get(f"/api/files/{info['id']}/events")) if m["type"] == "event"]
+    assert old[1]["t"] - old[0]["t"] == pytest.approx(0.5)                       # the old cut is still there
+    assert client.post("/api/files/nope/recut").status_code == 404
+
+
+def test_live_session_gets_the_current_interval():
+    client, _, engine = adaptive_client()
+    for _ in range(3):
+        engine.note(slow_event())
+    with client.websocket_connect("/ws/live") as ws:
+        ws.send_json({"type": "start", "sample_rate": SR})
+        assert ws.receive_json()["update_seconds"] == 2.0
+
 def test_start_is_clamped_to_the_file():
     client, model = make_client()
     file_id = client.post("/api/files", files={"file": ("a.wav", wav_bytes(tone(300, 3.0), SR))}).json()["id"]

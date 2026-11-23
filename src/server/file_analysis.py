@@ -35,6 +35,7 @@ class _Mark:
 
 class FileAnalysis:
     def __init__(self, model: AccentModel, settings: SessionSettings, audio: np.ndarray):
+        self.settings = settings          # this file's update interval (hop_seconds) and the rest
         self.sample_rate = model.sample_rate
         self.audio = np.ascontiguousarray(audio, dtype=np.float32)
         self.window_samples = round(settings.window_seconds * self.sample_rate)

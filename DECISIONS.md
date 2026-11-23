@@ -780,3 +780,55 @@ Short notes on each choice and why. Newest at the bottom.
   so the new backend doesn't load SpeechBrain.
 - **Default model:** `scripts/serve.py` still starts the stage-1 model; the new one is
   `--model models/cv27_es10`. Switching the default waits for the user's own test.
+
+## 2026-11-23: File mode: the update interval follows the computer's real speed
+
+- **Bug the user found:** with the 10-zone model, "Analyzing this part…" came back every
+  5–7 s while a file played, without any skipping.
+- **Cause:**
+  - At startup the user's server timed 1.40 s per 10 s window and chose an update every 1.75 s.
+  - During playback each window took longer than that. The simulation reproduces the symptom
+    at 2.2–3 s per window.
+  - File mode assumes each result takes less than one interval. When it doesn't, results fall
+    behind; the page keeps starting a pass further ahead, and each restart leaves a gap of
+    about 3 s.
+  - Why slower: the startup timing is a short burst. Under sustained load it is slower even on a
+    quiet machine (1.5 s instead of 1.34–1.40 s), and the browser and Windows programs share the
+    CPU with WSL.
+  - Stage 1 had the same weakness, just with a bit more slack on this machine.
+- **Fix, without touching how passes start and stop (step B):**
+  - **The server keeps timing the model** (`Engine.note`). Each new file and live session gets
+    its interval from the median of the last 3 times (`current_settings`, 1.2× headroom, as at
+    startup).
+    - Times are scaled to a full window, so the short windows at the start of a file count too.
+      In a quiet measurement 4–8 s windows scaled to within 7 % of a full one; below 40 % of a
+      window, fixed costs dominate, so those don't count.
+    - Under heavy load the short windows are relatively slower (4 s scaled to 8.2 s against 4.7 s
+      for full windows). The first choice can then be too long, which errs toward fewer updates,
+      not toward gaps.
+  - **New `POST /api/files/{id}/recut`:** cuts the same audio again with the current interval.
+    It returns the same id if nothing would change.
+  - **The page asks for a recut** when the median of its last 3 times exceeds 95 % of the file's
+    interval (`logic.js slowerThanPlayback`). Then it continues from the playhead.
+    - It keeps showing the earlier cut's results until the new ones arrive. Those results are
+      still correct for their stretch of audio.
+    - If the server keeps the interval, the page asks again only after 3 new results.
+  - A forced interval (`--update-seconds`) never changes. The server logs each file's interval
+    and each change.
+- **Checked:**
+  - **Simulation** (each window's time grows with its length, as measured; the server cut at
+    1.75 s):
+
+    | Time per window | Before (map gaps) | Now |
+    |---|---|---|
+    | 1.5 s | none | no change |
+    | 1.7 s | none | recut to 2.25 s at 4 s into playback, no gaps |
+    | 2.2–3.0 s | ~3 s gaps every 5–9 s for the whole file | one recut at 5.5–8 s, then one gap of 0.2–4 s |
+    | 4.0 s (extreme) | same, worse | two gaps |
+
+  - **Real server:** a file was streamed while 12 busy processes loaded the CPU. Windows took
+    about 4.7 s instead of 1.5 s, and the recut gave the file 5.75 s instead of 2.0 s, with log
+    lines saying why.
+  - New tests: the interval choice (scaling, too-short windows, getting faster again, forced
+    intervals), the recut endpoint, live sessions, the page helpers, and the simulation. All
+    392 fast tests pass.
