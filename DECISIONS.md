@@ -652,3 +652,48 @@ Short notes on each choice and why. Newest at the bottom.
     - So this is how XLSR-53's own last layers behave, not an error of ours.
   - These are lower bounds from a quick linear probe. They only decide which layers the
     classifier uses.
+
+## 2026-11-23: Stage 2, step 5b: layers and classifier chosen on dev
+
+- **Inputs written once** (`build_inputs`): for each candidate layer set, the chosen layers
+  standardized and averaged into one vector of 2,048 numbers per item.
+  - Candidates, from the probe's dev-pair scores: layer 17, windows of 3, 5 and 9 layers around
+    it, every layer within 5 points of the best (7–18), and all 25 layers.
+  - One pass per set: 34 s each for train and train_aug. The result is 2.5 GB in
+    `data/runs/cv27_es10/inputs/`, so each trial takes seconds instead of 40 s of reading.
+- **Training always uses the clean and the noisy copies.** Dev is clean audio, so it can't
+  judge the noisy copies, which are there for laptop microphones.
+- **Loss and stopping:** the loss weights the classes equally. Training keeps the epoch with the
+  best speaker-balanced accuracy on the dev pairs (the app's 10 s window), and stops 5 epochs
+  after it.
+- **Results** (dev pairs; dev clips in brackets; chance 10 %):
+
+  | Linear classifier on | Dev pairs |
+  |---|---|
+  | layer 17 | 48.0 % (43.3 %) |
+  | layers 16–18 | 47.8 % (42.5 %) |
+  | layers 7–18 | 46.5 % (42.4 %) |
+  | layers 15–19 | 45.5 % (41.7 %) |
+  | all 25 layers | 45.1 % (42.1 %) |
+  | layers 13–21 | 44.9 % (40.8 %) |
+
+  | Classifier on layer 17 | Dev pairs |
+  |---|---|
+  | **linear, weight decay 0.1 (chosen)** | **49.2 % (44.0 %)** |
+  | linear, weight decay 0.001 | 48.0 % (43.3 %) |
+  | hidden layer 512, dropout 0.3 | 46.3 % (41.4 %) |
+  | hidden layer 512, dropout 0.5 | 44.6 % (42.2 %) |
+  | hidden layer 1024, dropout 0.5 | 44.4 % (41.2 %) |
+
+- **What this says:**
+  - The differences are within noise. With 285 dev speakers, each number is about ±5 points.
+  - The larger classifiers don't help: they peak early and then fit the training speakers. The
+    limit is most likely the 3,384 training speakers, not the classifier's size.
+  - The simplest option won, and it is also the cheapest to run.
+  - 10 s pairs score about 5 points above single clips, which supports the 10 s inference
+    window.
+- **Saved classifier:** `data/runs/cv27_es10/head.pt`, 118 KB. It holds the class list, layer 17's
+  mean and spread, and the weights.
+  - It isn't committed yet. Where the app's model files live is part of plugging the model into
+    the app.
+- **Run time:** about 10 min of computing; peak memory 3.8 GB.
