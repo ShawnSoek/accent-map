@@ -697,3 +697,39 @@ Short notes on each choice and why. Newest at the bottom.
   - It isn't committed yet. Where the app's model files live is part of plugging the model into
     the app.
 - **Run time:** about 10 min of computing; peak memory 3.8 GB.
+
+## 2026-11-23: Stage 2, step 5c: calibrated on dev, evaluated once on test
+
+- **Temperature 1.37,** fitted on the dev pairs (`scripts/evaluate_head.py`) and saved into
+  `head.pt`. It changes no answer, only how sure the model claims to be.
+  - The untempered model was overconfident.
+  - Calibration error on the test pairs: 0.118 before, 0.029 after.
+  - This matters because the app shows probabilities and has an "uncertain" state.
+- **Test was evaluated once** (433 speakers no step had seen). The script refuses a second run
+  unless given `--again`, which needs a reason recorded here.
+- **Results** (balanced accuracy by speaker, 95 % interval; chance 10 %):
+
+  | Set | Balanced accuracy | Clip accuracy |
+  |---|---|---|
+  | test pairs (~10 s, like the app) | **48.3 % (44.4–52.3 %)** | 49.2 % |
+  | test clips (~5 s) | 43.9 % (40.7–47.0 %) | 47.1 % |
+  | dev pairs (chose the settings) | 49.2 % (44.8–53.5 %) | 47.9 % |
+
+  - Test matches dev, so choosing on dev did not flatter the numbers.
+- **Per class** (test pairs): rioplatense 66 %, chilean 61 %, canary 60 %, central_america
+  53 %, es_centre_south 51 %, mexico 49 %, caribbean 41 %, andean_pacific 38 %, es_south 33 %,
+  es_north 29 %.
+- **Mistakes are mostly between neighbours:**
+  - Spain vs. the Americas is right for 92.4 % of test pairs.
+  - Northern Spain is called central more often than northern (47 % vs. 26 %), and southern
+    Spain is often called central (31 %).
+  - In the Americas, the Caribbean, Andean and Central American accents mix: 20–26 % of each
+    goes to the others.
+  - Mexico and Central America swap 15–18 %.
+  - Rioplatense and Chilean stand out most.
+- **By gender** (test pairs): female 46.4 % (123 speakers), male 48.3 % (290). The difference
+  is within noise. Other or not given: 54 %, but only 20 speakers.
+- **Not comparable with the stage-1 model's 68.5 %.** That figure is for 6 classes, as plain
+  accuracy, on a split that didn't keep speakers apart.
+- These numbers are for read Common Voice speech. The real check is the user's own recordings
+  (`data/own_tests/`, evaluation only), once the model is in the app.
