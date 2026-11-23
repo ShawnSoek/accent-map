@@ -98,6 +98,43 @@ dialect zones, not countries:
   predictions. `models/commonaccent_es6/hyperparams.yaml` contains the fix. The weights still come
   unchanged from the pinned revision. See [DECISIONS.md](DECISIONS.md).
 
+## The 10-zone model (stage 2)
+
+`models/cv27_es10` is this repo's own model: the frozen base model XLSR-53 (only its layer 17)
+with a small classifier trained here on Common Voice 27.0 Spanish. Speakers were kept apart
+between training and test. It covers all ten Common Voice accent zones:
+
+```bash
+# The base model (1.3 GB); already there if you fetched the stage-1 model
+.venv/bin/python scripts/fetch_model.py models/cv27_es10
+.venv/bin/python scripts/serve.py --model models/cv27_es10
+```
+
+| Zone | Covers | Test (10 s) |
+|---|---|---|
+| Northern Spain | Asturias, Castile and León, Cantabria, Basque Country, Navarre, Aragon, La Rioja, Guadalajara, Cuenca | 29 % |
+| Central Spain | Madrid, the rest of Castilla-La Mancha | 51 % |
+| Southern Spain | Andalusia, Extremadura, Murcia | 33 % |
+| Canary Islands | | 60 % |
+| Mexico | Mexico except Veracruz, Tabasco and Quintana Roo | 49 % |
+| Central America | Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica | 53 % |
+| Caribbean | Cuba, Puerto Rico, Dominican Republic, Venezuela, Panama, Caribbean Colombia, Veracruz, Tabasco, Quintana Roo | 41 % |
+| Andean-Pacific | Colombia, Peru, Ecuador, western Bolivia, Andean Venezuela | 38 % |
+| Rioplatense | Argentina, Uruguay, Paraguay, eastern Bolivia | 66 % |
+| Chilean | Chile and Argentina's Cuyo region | 61 % |
+
+- On 433 Common Voice test speakers, 48 % of 10 s windows get the right zone (95 % interval
+  44–52 %), with each speaker and each zone counted equally; chance is 10 %. This is read
+  speech: expect less on your own recordings.
+- Most mistakes are between neighbours: northern vs. central Spain, and the Caribbean, Andean
+  and Central American zones. Spain vs. the Americas is right 92 % of the time.
+- The numbers can't be compared with the stage-1 model's 68.5 %, which is for 6 zones on a split
+  that let the same speakers appear in training and test.
+- Galicia, Catalonia, Valencia and the Balearic Islands have no Common Voice accent, so no zone.
+- One update takes about 1.4 s on a 10 s window (stage 1: 1.7 s), and the model needs about
+  1.5 GB of RAM (stage 1: 2.7 GB).
+- How it was made, step by step: [DECISIONS.md](DECISIONS.md), "Stage 2".
+
 ## Troubleshooting
 
 - **The page doesn't load from Windows (WSL2).** Start the server with
@@ -148,8 +185,9 @@ model with a different number of classes works without code changes.
 - Each class's `model_label` must match the label in the model's own files. The app reads the
   class order from the model and refuses to start if the labels don't match.
 - A backend implements `predict(16 kHz mono audio) -> {class_id: probability}` (see
-  `src/server/model_api.py`). Stage 1 has `speechbrain_custom_classifier` and `fake`, which
-  is used for tests.
+  `src/server/model_api.py`). There are `speechbrain_custom_classifier` (stage 1),
+  `xlsr_pooled_head` (stage 2: the base model plus a classifier file pinned by its SHA-256) and
+  `fake`, which is used for tests.
 - Start another model with `scripts/serve.py --model models/<name>`.
 
 ## Layout
@@ -169,7 +207,7 @@ data/            downloads and your own recordings (not committed)
   (Zuluaga-Gomez et al., 2023, arXiv:2305.18283).
 - Base model: facebook/wav2vec2-large-xlsr-53 (Apache-2.0).
 - Map data: made with [Natural Earth](https://www.naturalearthdata.com/) (public domain).
-- Training our own model (branch `stage2-own-model`): speech from Mozilla Common Voice 27.0 Spanish, via
+- Our own model `models/cv27_es10` (branch `stage2-own-model`): trained on speech from Mozilla Common Voice 27.0 Spanish, via
   Mozilla Data Collective under its Data Consumer Terms. Room echo and noise from the
   [Room Impulse Response and Noise Database](https://www.openslr.org/28/) (OpenSLR 28, Apache 2.0; real
   room recordings from RWCP, REVERB 2014 and AIR; noise sounds from the public-domain Freesound part of

@@ -37,10 +37,17 @@ def cpu_name() -> str:
 
 
 def speech_audio(model) -> np.ndarray:
-    """All sample clips of the model repo joined (~26 s), so every window is real speech."""
-    src = model.config.source
+    """The stage-1 model repo's 4 sample clips joined (~26 s), so every window is real speech.
+    Used for every model: for timing, any speech will do."""
+    from server.config import load_config
+    from server.paths import MODELS_DIR
+
+    src = load_config(MODELS_DIR / "commonaccent_es6").source
     clips = sorted((hf_cache_dir() / f"models--{src.repo.replace('/', '--')}" / "snapshots"
                     / src.revision / "data").glob("*.wav"))
+    if not clips:
+        sys.exit("speech for timing comes from the stage-1 sample clips: python scripts/fetch_model.py "
+                 "models/commonaccent_es6")
     return np.concatenate([decode_file(c, model.sample_rate) for c in clips])
 
 

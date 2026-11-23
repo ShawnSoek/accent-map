@@ -733,3 +733,50 @@ Short notes on each choice and why. Newest at the bottom.
   accuracy, on a split that didn't keep speakers apart.
 - These numbers are for read Common Voice speech. The real check is the user's own recordings
   (`data/own_tests/`, evaluation only), once the model is in the app.
+
+## 2026-11-23: Stage 2, step 6: the 10-zone model in the app
+
+- **New backend `xlsr_pooled_head`,** added to the existing list. The plug-in design is
+  unchanged: the app reads only `models/cv27_es10/config.yaml`.
+  - The base model XLSR-53 is pinned by revision, as in stage 1.
+  - The classifier is `head.safetensors` (116 KB, committed), pinned by its SHA-256 in
+    config.yaml and refused if it differs.
+  - The class order is read from the file's header and mapped to the config by label.
+- **Safetensors, not the training `.pt` file.** Loading safetensors cannot run code. The header
+  holds the class ids, the layer, the temperature, the storage scaling and the origin (git
+  commit, test result).
+- **The base model stops after layer 17:** 17 of 24 transformer layers.
+  - In XLSR-53, only the very last hidden state passes through the encoder's final layer norm.
+    So after cutting, that norm is replaced by "do nothing"; otherwise layer 17 would change.
+  - A test proves the cut model gives the full model's values. A control shows that cutting
+    without removing the norm doesn't.
+- **Same computation as in training:** the app reuses the training code for the features
+  (`FeatureExtractor`, including the float16 step) and for the classifier.
+  - Checked with the real model on 12 dev clips: from raw audio, the app gives the
+    evaluation's probabilities (which came from the GPU's stored features) within 0.002.
+- **Speed and memory** (8 threads, 10 s window): 1.35 s per update (stage 1: 1.66 s) and 1.5 GB
+  RAM (stage 1: 2.65 GB). The server then updates every 1.75 s.
+  - The gain is less than the 30 % fewer layers suggest, because the convolutional front end
+    always runs in full.
+- **Map:**
+  - New zones for northern and central Spain, the Canaries and Central America, following the
+    Common Voice labels.
+  - The provinces of Guadalajara and Cuenca are northern, as that label says, although they
+    belong to Castilla-La Mancha.
+  - Galicia, Catalonia, Valencia, the Balearic Islands, Ceuta and Melilla have no accent in
+    Common Voice; they stay greyed out as "not covered".
+  - The Canaries got their own map panel.
+  - The zone tests now run for both models, with 19 more test cities.
+- **The "confident" thresholds** (top zone ≥ 50 % and ≥ 15 points ahead) are unchanged.
+  - On the dev pairs: confident on 43 % of windows, right 63 % of the time then and 37 % otherwise.
+  - So the state means something with 10 classes too. Nothing was tuned on it.
+- **End to end:** the server ran with the new model, and two sample clips were streamed through
+  the live connection.
+  - The Mexico clip came out as Mexico (73–85 %, confident).
+  - The Spain clip came out as southern Spain (41–49 %, uncertain; stage 1 also said southern
+    Spain). The delay from speech to map was 0.6–0.9 s.
+- **Other changes:** `bench_latency.py` takes its timing speech from the stage-1 sample clips
+  for any model. The helper for pinned Hugging Face files moved to `server/backends/hf_files.py`,
+  so the new backend doesn't load SpeechBrain.
+- **Default model:** `scripts/serve.py` still starts the stage-1 model; the new one is
+  `--model models/cv27_es10`. Switching the default waits for the user's own test.

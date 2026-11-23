@@ -15,6 +15,7 @@ training clips and keeps the epoch with the best speaker-balanced accuracy on th
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -186,7 +187,9 @@ class TrainedHead:
     scaling undone, -> class probabilities."""
 
     def __init__(self, path: Path):
-        saved = torch.load(path, map_location="cpu", weights_only=True)
+        path = Path(path)
+        saved = read_safetensors_head(path) if path.suffix == ".safetensors" else \
+            torch.load(path, map_location="cpu", weights_only=True)
         self.class_ids: list[str] = saved["class_ids"]
         self.layers: list[int] = saved["layers"]
         self.layer_mean = saved["layer_mean"].numpy()
@@ -206,3 +209,37 @@ class TrainedHead:
         t = self.temperature if temperature is None else temperature
         logits = self.model(torch.from_numpy(self.inputs(x).astype(np.float32)))
         return torch.softmax(logits / t, dim=-1).numpy()
+
+
+HEAD_FORMAT = "accent-map-head/1"
+
+
+def export_head(head: TrainedHead, path: Path, storage_scale: dict[int, float], info: dict) -> None:
+    """Write a classifier for the app as safetensors: tensors plus a text header (class ids in
+    output order, layers, temperature, storage scaling, where it came from). Unlike a .pt file,
+    loading it cannot run code."""
+    from safetensors.torch import save_file
+
+    tensors = {"layer_mean": torch.from_numpy(np.ascontiguousarray(head.layer_mean)),
+               "layer_std": torch.from_numpy(np.ascontiguousarray(head.layer_std))}
+    tensors.update({f"head.{k}": v.contiguous() for k, v in head.model.state_dict().items()})
+    meta = {"format": HEAD_FORMAT, "class_ids": head.class_ids, "layers": head.layers,
+            "hidden": head.saved["hidden"], "dropout": head.saved["dropout"], "temperature": head.temperature,
+            "storage_scale": {str(k): v for k, v in storage_scale.items()}, "info": info}
+    save_file(tensors, str(path), metadata={k: json.dumps(v) for k, v in meta.items()})
+
+
+def read_safetensors_head(path: Path) -> dict:
+    from safetensors import safe_open
+
+    with safe_open(str(path), framework="pt") as f:
+        raw = f.metadata() or {}
+        if raw.get("format") != json.dumps(HEAD_FORMAT):
+            raise ValueError(f"{path} is not an accent-map classifier (format {raw.get('format')!r})")
+        meta = {k: json.loads(v) for k, v in raw.items()}
+        tensors = {k: f.get_tensor(k) for k in f.keys()}
+    return {"class_ids": meta["class_ids"], "layers": meta["layers"], "hidden": meta["hidden"],
+            "dropout": meta["dropout"], "temperature": meta["temperature"],
+            "storage_scale": {int(k): v for k, v in meta["storage_scale"].items()}, "info": meta["info"],
+            "layer_mean": tensors["layer_mean"], "layer_std": tensors["layer_std"],
+            "state_dict": {k.removeprefix("head."): v for k, v in tensors.items() if k.startswith("head.")}}

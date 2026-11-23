@@ -67,10 +67,29 @@ def pool(hidden_states: tuple[torch.Tensor, ...], scale: np.ndarray | None = Non
     return pooled.astype(np.float16)
 
 
+def _truncate(model, last_layer: int) -> None:
+    """Keep the first `last_layer` transformer layers. In XLSR-53's layout (stable layer norm),
+    hidden state k < 24 is the un-normalized input of layer k, and only the very last one passes
+    through the encoder's final layer norm. So after cutting, that final norm must go too, or
+    hidden state `last_layer` would differ from the full model's."""
+    import torch
+
+    if not model.config.do_stable_layer_norm:
+        raise ValueError("last_layer needs a stable-layer-norm wav2vec2 (as XLSR-53)")
+    if not 1 <= last_layer:
+        raise ValueError(f"last_layer must be at least 1, got {last_layer}")
+    model.encoder.layers = model.encoder.layers[:last_layer]
+    model.encoder.layer_norm = torch.nn.Identity()
+    model.config.num_hidden_layers = last_layer
+
+
 class FeatureExtractor:
     """The frozen base model on one device. Loading fails if any weight it needs is missing."""
 
-    def __init__(self, model_dir: str | Path, device: str = "cpu", storage_scale: dict[int, float] | None = None):
+    def __init__(self, model_dir: str | Path, device: str = "cpu", storage_scale: dict[int, float] | None = None,
+                 last_layer: int | None = None):
+        """`last_layer`: compute only hidden states 0..last_layer, with the same values as the
+        full model (the app needs only the layers its classifier uses; later ones cost time)."""
         from transformers import Wav2Vec2Model
 
         model, info = Wav2Vec2Model.from_pretrained(str(model_dir), output_loading_info=True)
@@ -78,11 +97,13 @@ class FeatureExtractor:
             raise RuntimeError(f"base model weights missing: {info['missing_keys'][:5]} "
                                f"mismatched: {info['mismatched_keys'][:5]}")
         self.unused_keys = len(info["unexpected_keys"])   # pre-training heads (quantizer etc.)
+        if last_layer is not None and last_layer < model.config.num_hidden_layers:
+            _truncate(model, last_layer)
         self.model = model.eval().to(device)
         self.device = device
         self.layers = model.config.num_hidden_layers + 1
         self.width = model.config.hidden_size
-        self.scale = scale_vector(self.layers, storage_scale)
+        self.scale = scale_vector(self.layers, {k: v for k, v in (storage_scale or {}).items() if k < self.layers})
 
     @torch.inference_mode()
     def __call__(self, audio: np.ndarray) -> np.ndarray:

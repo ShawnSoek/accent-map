@@ -1,0 +1,81 @@
+# How Natural Earth admin-1 regions are merged into this model's map zones.
+# Input: data/naturalearth/ne_10m_admin_1_states_provinces.geojson (Natural Earth v5.1.2, public domain).
+# Build: python scripts/build_zones.py models/cv27_es10   ->  zones.geojson (committed)
+#
+# Each admin-1 region goes to exactly one group. Most specific rule wins:
+#   codes (ISO 3166-2, e.g. MX-VER)  >  communities (Spain's autonomous communities)  >  countries (ISO alpha-3)
+# Regions not matched by any rule are drawn as plain land (no accent information).
+# The zones follow the Common Voice accent labels the model was trained on (quoted per zone).
+# They are approximations of dialect areas, built from administrative regions. They are not borders.
+
+zones:
+  es_north:          # "España: Norte peninsular (Asturias, Castilla y León, Cantabria, País Vasco, Navarra,
+                     #  Aragón, La Rioja, Guadalajara, Cuenca)"
+    communities: [Asturias, Castilla y León, Cantabria, País Vasco, Foral de Navarra, Aragón, La Rioja]
+    codes:
+      - ES-GU  # Guadalajara  (a province of Castilla-La Mancha; the Common Voice label puts it here)
+      - ES-CU  # Cuenca       (likewise)
+  es_centre_south:   # "España: Centro-Sur peninsular (Madrid, Toledo, Castilla-La Mancha)"
+    communities: [Madrid, Castilla-La Mancha]   # Toledo, Ciudad Real, Albacete (Guadalajara, Cuenca: north)
+  es_south:          # "España: Sur peninsular (Andalucia, Extremadura, Murcia)"
+    communities: [Andalucía, Extremadura, Murcia]
+  es_canary:         # "España: Islas Canarias"
+    communities: [Canary Is.]
+  mexico:            # "México" (Gulf and Caribbean coast states go to caribbean below, as in stage 1)
+    countries: [MEX]
+  central_america:   # "América central"
+    countries: [GTM, HND, SLV, NIC, CRI]   # Panama: caribbean (the Caribbean label names it)
+  andean_pacific:    # "Andino-Pacífico: Colombia, Perú, Ecuador, oeste de Bolivia y Venezuela andina"
+    countries: [COL, PER, ECU]
+    codes:
+      - BO-L   # La Paz        (western Bolivia)
+      - BO-O   # Oruro
+      - BO-P   # Potosí
+      - BO-C   # Cochabamba
+      - BO-H   # Chuquisaca
+      - VE-L   # Mérida        (Andean Venezuela)
+      - VE-S   # Táchira
+      - VE-T   # Trujillo
+  caribbean:         # "Caribe: Cuba, Venezuela, Puerto Rico, República Dominicana, Panamá, Colombia caribeña,
+                     #  México caribeño, Costa del golfo de México"
+    countries: [CUB, PRI, DOM, PAN, VEN]
+    codes:
+      - CO-LAG # La Guajira    (Caribbean Colombia)
+      - CO-MAG # Magdalena
+      - CO-ATL # Atlántico
+      - CO-BOL # Bolívar
+      - CO-SUC # Sucre
+      - CO-COR # Córdoba
+      - CO-CES # Cesar
+      - CO-SAP # San Andrés y Providencia
+      - MX-VER # Veracruz      (Gulf coast)
+      - MX-TAB # Tabasco       (Gulf coast)
+      - MX-ROO # Quintana Roo  (Mexican Caribbean)
+      # Not here, as in stage 1 (DECISIONS.md): Campeche, Yucatán and Tamaulipas stay in mexico.
+  rioplatense:       # "Rioplatense: Argentina, Uruguay, este de Bolivia, Paraguay"
+    countries: [ARG, URY, PRY]   # all of Argentina except Cuyo
+    codes:
+      - BO-S   # Santa Cruz    (eastern Bolivia)
+      - BO-B   # El Beni
+      - BO-N   # Pando
+      - BO-T   # Tarija
+  chilean:           # "Chileno: Chile, Cuyo"
+    countries: [CHL]
+    codes:
+      - AR-M   # Mendoza       (Cuyo)
+      - AR-J   # San Juan
+      - AR-D   # San Luis
+
+# Spanish-speaking areas this model has no class for. Drawn greyed out as "not covered".
+# Common Voice offers no accent for them; their speakers were not in training.
+uncovered:
+  spain_other:
+    label: "Galicia, Catalonia, Valencia, Balearic Islands, Ceuta, Melilla (not covered)"
+    countries: [ESP]
+
+# Build settings per map panel (panel ids and boxes are in config.yaml).
+# tolerance: simplification in degrees; min_area: drop islands smaller than this (square degrees).
+build:
+  americas: {tolerance: 0.04, min_area: 0.02}
+  spain:    {tolerance: 0.015, min_area: 0.005}
+  canaries: {tolerance: 0.005, min_area: 0.001}

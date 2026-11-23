@@ -21,19 +21,15 @@ from pathlib import Path
 import numpy as np
 import torch
 from huggingface_hub import snapshot_download
-from huggingface_hub.errors import LocalEntryNotFoundError
 from hyperpyyaml import load_hyperpyyaml
 from pydantic import BaseModel, ConfigDict, Field
 from speechbrain.dataio.encoder import CategoricalEncoder
 from speechbrain.utils.superpowers import import_from_path
 
-from server.config import ModelConfig, SourceInfo
-from server.model_api import AccentModel, ModelFilesMissing, label_permutation
+from server.backends.hf_files import BaseModelSpec, local_snapshot
+from server.config import ModelConfig
+from server.model_api import AccentModel, label_permutation
 from server.paths import hf_cache_dir
-
-
-class BaseModelSpec(SourceInfo):
-    files: list[str] = Field(min_length=1)
 
 
 class Options(BaseModel):
@@ -55,28 +51,14 @@ def _options(config: ModelConfig) -> Options:
     return Options.model_validate(config.backend_options)
 
 
-def _local_snapshot(repo: str, revision: str, files: list[str], cache_dir: Path, model_dir) -> Path:
-    try:
-        path = Path(snapshot_download(repo, revision=revision, cache_dir=cache_dir, local_files_only=True))
-    except LocalEntryNotFoundError:
-        path = None
-    missing = [f for f in files if path is None or not (path / f).is_file()]
-    if missing:
-        raise ModelFilesMissing(
-            f"{repo}@{revision[:8]} is not fully downloaded to {cache_dir} (missing: {missing}). "
-            f"Run: python scripts/fetch_model.py {model_dir}"
-        )
-    return path
-
-
 class SpeechBrainCustomClassifier(AccentModel):
     def __init__(self, config: ModelConfig, cache_dir: Path | None = None, device: str = "cpu"):
         super().__init__(config)
         opts = _options(config)
         cache_dir = Path(cache_dir) if cache_dir else hf_cache_dir()
         source_files = [opts.pymodule_file, opts.label_encoder_file, *opts.checkpoints.values()]
-        src = _local_snapshot(config.source.repo, config.source.revision, source_files, cache_dir, config.model_dir)
-        base = _local_snapshot(opts.base_model.repo, opts.base_model.revision, opts.base_model.files,
+        src = local_snapshot(config.source.repo, config.source.revision, source_files, cache_dir, config.model_dir)
+        base = local_snapshot(opts.base_model.repo, opts.base_model.revision, opts.base_model.files,
                                cache_dir, config.model_dir)
 
         # The pinned custom_interface.py imports the pre-1.0 path speechbrain.pretrained,

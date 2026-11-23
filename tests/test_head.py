@@ -113,3 +113,26 @@ def test_temperature_fixes_over_and_under_confidence():
     assert fit_temperature(true_p, y) == pytest.approx(1.0, abs=0.1)
     assert fit_temperature(softmax(logits * 3), y) == pytest.approx(3.0, rel=0.1)       # too sure: cool down
     assert fit_temperature(softmax(logits / 2), y) == pytest.approx(0.5, rel=0.1)       # too unsure
+
+
+def test_exported_head_matches_and_strangers_are_refused(data, tmp_path):
+    from safetensors.torch import save_file
+
+    from training.head import TrainedHead, export_head, save_head
+    folder, info, train, mean, std = data
+    _, x, y, _ = arrays(folder / "signal", "train", info)
+    _, dx, dy, dspk = arrays(folder / "signal", "dev", info)
+    config = HeadConfig(hidden=0, lr=1e-2, batch=32, max_epochs=3)
+    model, _ = train_head(x, y, dx, dy, dspk, CLASSES, config, log=lambda m: None)
+    save_head(tmp_path / "head.pt", model, ["k0", "k1", "k2"], [2], mean, std, config, temperature=1.3)
+    original = TrainedHead(tmp_path / "head.pt")
+    export_head(original, tmp_path / "head.safetensors", {3: 4.0}, {"trained_on": "test"})
+    copy = TrainedHead(tmp_path / "head.safetensors")
+    _, rows = train.read(0, 0, 30)
+    np.testing.assert_array_equal(copy.probabilities(rows), original.probabilities(rows))
+    assert (copy.class_ids, copy.layers, copy.temperature) == (["k0", "k1", "k2"], [2], 1.3)
+    assert copy.saved["storage_scale"] == {3: 4.0} and copy.saved["info"] == {"trained_on": "test"}
+    import torch
+    save_file({"x": torch.zeros(2)}, str(tmp_path / "other.safetensors"), metadata={"format": "something else"})
+    with pytest.raises(ValueError, match="not an accent-map classifier"):
+        TrainedHead(tmp_path / "other.safetensors")

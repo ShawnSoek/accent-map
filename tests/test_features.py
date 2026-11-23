@@ -62,6 +62,23 @@ def test_extractor_shape_and_determinism(model_dir):
     assert np.array_equal(ex(audio), ex(audio * 3.0))          # normalized: loudness does not matter
 
 
+
+def test_stopping_after_a_layer_keeps_its_values(model_dir):
+    audio = np.random.default_rng(4).standard_normal(2 * SR).astype(np.float32) * 0.1
+    full = FeatureExtractor(model_dir)(audio)
+    short = FeatureExtractor(model_dir, storage_scale={0: 2, 2: 4}, last_layer=1)
+    assert short.layers == 2 and len(short.model.encoder.layers) == 1
+    got = short(audio)
+    assert got.shape == (2, 32)
+    np.testing.assert_array_equal(got[0], np.float16(full[0].astype(np.float32) / 2))     # scale kept for layer 0
+    np.testing.assert_array_equal(got[1], full[1])
+    naive = FeatureExtractor(model_dir).model                   # cutting without removing the final norm
+    naive.encoder.layers = naive.encoder.layers[:1]
+    with torch.inference_mode():
+        states = naive(torch.from_numpy(normalize(audio))[None], output_hidden_states=True).hidden_states
+    assert not np.allclose(pool(states)[1].astype(np.float32), full[1].astype(np.float32), atol=1e-2)
+    assert FeatureExtractor(model_dir, last_layer=5).layers == 3            # beyond the model: nothing cut
+
 def test_missing_weights_fail_loudly(model_dir, tmp_path):
     from safetensors.torch import load_file, save_file
     broken = tmp_path / "broken"
