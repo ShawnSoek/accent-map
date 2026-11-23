@@ -589,3 +589,31 @@ Short notes on each choice and why. Newest at the bottom.
   and the folder was made read-only. Then the job's own steps ran here on the CPU:
   - all 64,073 files were checked in 60 s
   - the reference check gave results identical to the reference for all 48 items
+
+## 2026-11-23: Stage 2, step 4 done: features computed on Kaggle, downloaded and checked
+
+- **Second run worked.** It waited about 3¾ h in Kaggle's queue, then ran for 5 h on two T4s.
+  All 119,980 items were done, with about 55 s of audio per second per GPU.
+  - Kaggle's reference check, with GPU results against the laptop's on 48 items: lowest cosine
+    0.9999998, largest relative difference 0.08 % (limits 0.9999 and 2 %).
+  - "GPU will not be used" in the log comes from TensorFlow, which Kaggle loads by default; our
+    code ran on CUDA. The pip conflict warnings are about packages we don't use.
+- **Where the time went:** checking the 64,073 bundle files took 3 h 9 min on Kaggle but 60 s on
+  the laptop. The extraction then read the same clips quickly, so the time was most likely
+  Kaggle's first fetch of many small files from its dataset storage, not the hashing.
+  - The extraction itself took 110 min. The job used about 5 of the 30 GPU hours.
+  - **For a future run:** upload the data as one large file that Kaggle doesn't unpack.
+- **Download:** `kaggle kernels output` put the 12 GB into a `features/` subfolder at about
+  10 MB/s. The files were moved to `data/features/cv27_es10/` (not committed); the job log is in
+  `data/kaggle/cv27_es10/run_logs/attempt2/`.
+- **Check before use** (`scripts/check_features.py`, 13 tests): checksums against
+  `summary.json`, same bundle, every item exactly once in the part and order `extract_job` uses,
+  all rows written, none all zeros, all values finite. It also compares 48 rows of the full run
+  with the laptop's reference results.
+  - That last check matters because Kaggle's reference check used a separate small run, so it
+    could not catch rows stored next to the wrong ids.
+  - Result: OK in 44 s, with the same closeness as on Kaggle. Largest stored value 319.5
+    (layer 21), far below the float16 limit of 65,504, so the scaling of layers 22 and 23 left
+    plenty of room.
+  - The check writes `verified.json`; training will read only features that have it.
+- The private Kaggle dataset (4 GB) is no longer needed. Deleting it is the user's call.
