@@ -71,3 +71,56 @@ def tiny_base_model(folder, seed: int = 0):
                             feat_extract_norm="layer", do_stable_layer_norm=True)
     Wav2Vec2Model(config).save_pretrained(folder)
     return folder
+
+
+def make_feature_folder(folder, sets: dict, parts: int = 2):
+    """A verified features folder as check_features.py leaves it: per set, item k goes to part
+    k % parts (as extract_job does), stored as float16. `sets`: name -> (ids, rows)."""
+    import json
+    from pathlib import Path
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, (ids, rows) in sets.items():
+        for i in range(parts):
+            stem = f"{name}.part{i}of{parts}"
+            (folder / f"{stem}.ids").write_text("".join(f"{x}\n" for x in ids[i::parts]))
+            np.save(folder / f"{stem}.npy", np.asarray(rows[i::parts], dtype=np.float16))
+    (folder / "verified.json").write_text(json.dumps({"parts": {name: parts for name in sets}}))
+    return folder
+
+
+def make_accent_data(root, layers: int = 4, dim: int = 8, classes: int = 3, signal_layer: int = 2,
+                     scale=(1, 1, 1, 4), sets=(("train", 12, 10, 1), ("dev", 6, 6, 2), ("test", 2, 2, 3))):
+    """Synthetic verified features whose class shows only in `signal_layer`; every speaker also has
+    its own offset. Layers are stored divided by `scale`, as layers 22-23 are. `sets`: (name,
+    speakers per class, clips per speaker, seed). Returns (features folder, items table path,
+    {set: (ids, stored rows)}); class ids are k0, k1, ..."""
+    from pathlib import Path
+
+    root = Path(root)
+    scale = np.asarray(scale, dtype=np.float32)
+    centres = np.random.default_rng(99).normal(size=(classes, dim)) * 1.5
+    out, labels = {}, {}
+    for name, speakers_per_class, clips, seed in sets:
+        rng = np.random.default_rng(seed)
+        ids, rows = [], []
+        for c in range(classes):
+            for s in range(speakers_per_class):
+                speaker = f"{name}-c{c}-s{s}"
+                offset = rng.normal(size=(layers, dim)) * 0.5
+                for _ in range(clips):
+                    x = rng.normal(size=(layers, dim)) + offset + 10
+                    x[signal_layer] += centres[c]
+                    item = f"{name}/{len(ids):06d}"
+                    ids.append(item)
+                    rows.append(x / scale[:, None])
+                    labels[item] = (c, speaker)
+        out[name] = (ids, np.array(rows))
+    make_feature_folder(root / "features", out)
+    table = root / "items_local.tsv"
+    with open(table, "w") as f:
+        f.write("id\tset\taugment\tclips\tlabel\tspeaker\tgender\tseconds\n")
+        for item, (c, speaker) in labels.items():
+            f.write(f"{item}\t{item.split('/')[0]}\t0\tx.mp3\tk{c}\t{speaker}\t{'fm'[c % 2]}\t5\n")
+    return root / "features", table, out

@@ -617,3 +617,38 @@ Short notes on each choice and why. Newest at the bottom.
     plenty of room.
   - The check writes `verified.json`; training will read only features that have it.
 - The private Kaggle dataset (4 GB) is no longer needed. Deleting it is the user's call.
+
+## 2026-11-23: Stage 2, step 5a: which layers carry the accent
+
+- **Reading the features:** `src/training/feature_store.py` reads only folders with
+  `verified.json` and undoes the storage scaling of layers 22 and 23.
+  - Test and test_pairs open only with an explicit flag, which the training and tuning code
+    never passes. The test speakers stay unseen until the final evaluation.
+- **Training reads blocks of rows in order.** This disk reads about 250 MB/s in order but only
+  33–97 MB/s at random, and only about 3 GB of RAM is free (WSL has 6.7 GB).
+  - Rows are sorted by speaker hash, so a block of 2,000 rows holds about 140 speakers from
+    every class. Blocks come in random order and are shuffled inside.
+- **Main measure: balanced accuracy by speaker** (`src/training/metrics.py`).
+  - Per class, each speaker's share of correct answers is averaged over the speakers; then the
+    classes are averaged. A speaker with 50 clips counts as much as one with 5, and the Canaries
+    as much as Mexico.
+  - 95 % intervals come from resampling speakers within each class, because clips of one
+    speaker are not independent.
+  - Also reported: clip accuracy, log loss, calibration error, the confusion table, and results
+    by gender (f, m, other/not given).
+- **Probe** (`scripts/train_probe.py`): one linear classifier per layer, all trained together
+  for 4 epochs on the clean training clips. Inputs are standardized per layer and dimension;
+  the loss weights the classes equally. Run time 2¼ min, 3.6 GB RAM at most.
+- **Result** (dev pairs, about 10 s; chance is 10 %):
+  - The accent is in the middle layers: layers 7–18 reach 41–46 %, with layer 17 highest
+    (45.6 %, interval 40.6–50.3 %). Dev clips (about 5 s) score 2–4 points lower.
+  - Early layers are lower (layer 0: 22 %), and so is the last one (layer 24: 25 %).
+  - **Layers 22 and 23 are almost useless (14 %).** These are the layers with values of about
+    38,000.
+    - Checked: their statistics match an exact computation, with no tiny spreads and no extreme
+      standardized values.
+    - Scaling can't be the cause: a standardized probe ignores any factor on a whole layer.
+    - GPU and laptop agreed on every layer.
+    - So this is how XLSR-53's own last layers behave, not an error of ours.
+  - These are lower bounds from a quick linear probe. They only decide which layers the
+    classifier uses.
