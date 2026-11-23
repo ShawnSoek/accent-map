@@ -1,8 +1,11 @@
 """Load a model through the app's interface and classify whole audio files.
 
 Usage:
-  python scripts/check_model.py models/commonaccent_es6            # the model's sample clips
-  python scripts/check_model.py models/commonaccent_es6 a.wav b.flac
+  python scripts/check_model.py models/cv27_es10                 # the 4 stage-1 sample clips
+  python scripts/check_model.py models/cv27_es10 a.wav b.flac
+
+Without files it uses the 4 example clips of the stage-1 model's repo (fetch_model.py
+models/commonaccent_es6 downloads them).
 
 Prints load time, peak memory, the model's class order and per-file probabilities.
 Each file is classified as one piece (no windowing), resampled with soxr.
@@ -20,8 +23,11 @@ from server.model_api import load_model  # noqa: E402
 from server.paths import hf_cache_dir  # noqa: E402
 
 
-def sample_clips(model) -> list[Path]:
-    src = model.config.source
+def sample_clips() -> list[Path]:
+    from server.config import load_config
+    from server.paths import MODELS_DIR
+
+    src = load_config(MODELS_DIR / "commonaccent_es6").source
     snapshots = hf_cache_dir() / f"models--{src.repo.replace('/', '--')}" / "snapshots" / src.revision
     return sorted((snapshots / "data").glob("*.wav"))
 
@@ -39,7 +45,10 @@ def main() -> None:
         for i, label in enumerate(model.model_labels):
             print(f"  {i}: {by_label[label]:15s} <- {label}")
 
-    files = [Path(p) for p in sys.argv[2:]] or sample_clips(model)
+    files = [Path(p) for p in sys.argv[2:]] or sample_clips()
+    if not files:
+        sys.exit("no files given, and the stage-1 sample clips are not downloaded: "
+                 "python scripts/fetch_model.py models/commonaccent_es6")
     ids = model.class_ids
     print(f"\n{'file':28s} {'sec':>5s}  " + " ".join(f"{i[:9]:>9s}" for i in ids) + "   top")
     for f in files:

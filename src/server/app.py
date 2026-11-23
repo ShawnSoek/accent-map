@@ -55,7 +55,7 @@ from server.session import AnalysisSession, Event, Pending, SessionSettings, Win
 
 log = logging.getLogger("uvicorn.error")
 
-DEFAULT_MODEL_DIR = MODELS_DIR / "commonaccent_es6"
+DEFAULT_MODEL_DIR = MODELS_DIR / "cv27_es10"
 WEB_DIR = REPO_ROOT / "web"
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_FILE_SECONDS = 15 * 60

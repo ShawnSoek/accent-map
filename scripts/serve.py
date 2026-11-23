@@ -1,7 +1,7 @@
 """Start the Accent Map server.
 
 Usage:
-  python scripts/serve.py [--model models/commonaccent_es6] [--host 127.0.0.1] [--port 8000]
+  python scripts/serve.py [--model models/cv27_es10] [--host 127.0.0.1] [--port 8000]
                           [--update-seconds S]
 
 Loads the model and times one inference (about 10 s), then picks how often to update

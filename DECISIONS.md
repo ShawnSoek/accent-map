@@ -832,3 +832,45 @@ Short notes on each choice and why. Newest at the bottom.
   - New tests: the interval choice (scaling, too-short windows, getting faster again, forced
     intervals), the recut endpoint, live sessions, the page helpers, and the simulation. All
     392 fast tests pass.
+
+## 2026-11-23: Project wrap-up
+
+The user may stop here, so the repo was left as if the project ends.
+
+- **README rewritten as the final document:**
+  - quick start
+  - use and speed
+  - both models compared, with honest numbers and where each comes from (dev or test)
+  - how the 10-zone model was made, with every command to reproduce it
+  - what could come next, troubleshooting, development, credits
+- **The 10-zone model is now the default** (`scripts/serve.py` without `--model`). The user
+  tested it in the browser (map, file mode).
+  - It covers all zones and was evaluated on speakers it had never heard.
+  - It is faster and needs half the memory.
+  - The 6-zone model stays available with `--model models/commonaccent_es6`.
+- `scripts/check_model.py` works with any model; without files it uses the stage-1 sample clips.
+- **Where things are:**
+  - Everything is on branch `stage2-own-model`; `main` has stage 1 only (the 6-zone model,
+    10 s window, file mode following the playhead).
+  - Merging and pushing are the user's decision. Pushing publishes the classifier
+    `models/cv27_es10/head.safetensors`. It holds only trained weights and aggregate statistics,
+    with no audio and no speaker information.
+- **Not committed, on the user's computer** (`data/`, about 77 GB):
+
+  | What | Size | Needed for |
+  |---|---|---|
+  | Common Voice archive and extracted clips | 52 GB | retraining |
+  | features | 12 GB | retraining the classifier |
+  | noise collection | 4.8 GB | retraining |
+  | Kaggle bundle | 3.9 GB | another Kaggle run |
+  | classifier inputs and runs | 2.5 GB | retraining |
+  | Hugging Face models | 2.4 GB | running the app |
+
+  - Also `.venv-old`, the original Python 3.10 environment from before stage 1.
+  - Deleting is the user's decision. The private Kaggle dataset `shawnsker/accent-map-cv27-es10`
+    (4 GB) also still exists.
+- **Open ends** (README, "What could come next"):
+  - Evaluation on the user's own recordings was never done; `data/own_tests/` was never filled.
+  - Ideas for accuracy, with rough gains: fine-tuning XLSR-53 (+6 to +12 points), a classifier
+    that attends over time (+3 to +6), a whole-recording verdict (+4 to +6, measured on dev),
+    more speakers (+1 to +2).
