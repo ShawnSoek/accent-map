@@ -98,6 +98,7 @@ class AccentModel(ABC):
 # backend never import torch.
 BACKENDS = {
     "speechbrain_custom_classifier": "server.backends.speechbrain_classifier:SpeechBrainCustomClassifier",
+    "xlsr_pooled_head": "server.backends.xlsr_head:XlsrPooledHead",
     "fake": "server.backends.fake:FakeAccentModel",
 }
 

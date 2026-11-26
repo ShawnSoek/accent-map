@@ -1,0 +1,96 @@
+# Stage-2 model, trained in this repo. The app reads only this file; see src/server/config.py.
+# How it was made: DECISIONS.md, "Stage 2" (data: training/cv27_es10/, scripts/train_*.py).
+name: cv27_es10
+display_name: "Accent Map · Spanish, 10 dialect zones (XLSR-53 + own classifier)"
+description: >-
+  Frozen wav2vec2 XLSR-53 (layer 17) with a linear classifier trained in this repo on
+  Common Voice 27.0 Spanish, with speakers kept apart between training and test.
+  Classes are the Common Voice accent zones, not countries.
+
+backend: xlsr_pooled_head
+backend_options:
+  base_model:
+    repo: facebook/wav2vec2-large-xlsr-53
+    revision: c3f9d884181a224a6ac87bf8885c84d1cff3384f
+    license: Apache-2.0
+    files: [config.json, preprocessor_config.json, pytorch_model.bin]
+  # Made by scripts/export_head.py; refused if its SHA-256 differs.
+  head_file: head.safetensors
+  head_sha256: 1eab7a1a01f8555ea58fb7fd3e145385195b29e8f3fd9ee55e60f3cd03e25039
+
+audio:
+  sample_rate: 16000
+  window_seconds: 10.0   # the classifier was chosen and calibrated on ~10 s pieces
+  hop_seconds: 0.5       # target; the server updates less often if the CPU is slower
+
+caveats:
+  - "On Common Voice test speakers, 48% of 10 s windows get the right zone (each zone counted equally; chance is 10%). Expect less on your own recordings."
+  - "Mistakes are mostly between neighbouring zones: northern and central Spain, and the Caribbean, Andean and Central American zones."
+  - "Galicia, Catalonia, Valencia and the Balearic Islands have no zone, nor do speakers from outside these areas; they are still assigned to one of them."
+
+# Zones are built from Natural Earth by scripts/build_zones.py using zones_spec.yaml.
+map:
+  zones_file: zones.geojson
+  panels:
+    - id: americas
+      title: "Americas"
+      bbox: [-118.0, -56.5, -34.0, 33.5]   # west, south, east, north
+    - id: spain
+      title: "Spain"
+      bbox: [-10.0, 35.0, 4.6, 44.2]
+    - id: canaries
+      title: "Canary Islands"
+      bbox: [-18.4, 27.4, -13.2, 29.6]
+
+# Order here is free: the backend maps outputs by model_label, read from head.safetensors.
+classes:
+  - id: es_north
+    model_label: es_north
+    label: "Northern Spain"
+    description: "Asturias, Castile and León, Cantabria, Basque Country, Navarre, Aragon, La Rioja, and the provinces of Guadalajara and Cuenca."
+    zone: es_north
+  - id: es_centre_south
+    model_label: es_centre_south
+    label: "Central Spain"
+    description: "Madrid and Castilla-La Mancha (Toledo, Ciudad Real, Albacete). Common Voice calls it centre-south."
+    zone: es_centre_south
+  - id: es_south
+    model_label: es_south
+    label: "Southern Spain"
+    description: "Andalusia, Extremadura, Murcia."
+    zone: es_south
+  - id: es_canary
+    model_label: es_canary
+    label: "Canary Islands"
+    description: "Tenerife, Gran Canaria and the other Canary Islands."
+    zone: es_canary
+  - id: mexico
+    model_label: mexico
+    label: "Mexico"
+    description: "Mexico, except Veracruz, Tabasco and Quintana Roo (those count as Caribbean)."
+    zone: mexico
+  - id: central_america
+    model_label: central_america
+    label: "Central America"
+    description: "Guatemala, Honduras, El Salvador, Nicaragua, Costa Rica. Panama counts as Caribbean."
+    zone: central_america
+  - id: caribbean
+    model_label: caribbean
+    label: "Caribbean"
+    description: "Cuba, Puerto Rico, Dominican Republic, Venezuela (except the Andes), Panama, Caribbean Colombia, Mexico's Gulf coast (Veracruz, Tabasco) and Caribbean coast (Quintana Roo)."
+    zone: caribbean
+  - id: andean_pacific
+    model_label: andean_pacific
+    label: "Andean-Pacific"
+    description: "Inland Colombia, Peru, Ecuador, western Bolivia, Andean Venezuela."
+    zone: andean_pacific
+  - id: rioplatense
+    model_label: rioplatense
+    label: "Rioplatense"
+    description: "Argentina, Uruguay, Paraguay, eastern Bolivia."
+    zone: rioplatense
+  - id: chilean
+    model_label: chilean
+    label: "Chilean"
+    description: "Chile and Argentina's Cuyo region (Mendoza, San Juan, San Luis)."
+    zone: chilean

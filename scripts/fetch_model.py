@@ -1,6 +1,6 @@
 """Download the files a model needs, at the revisions pinned in its config.yaml.
 
-Usage: python scripts/fetch_model.py models/commonaccent_es6
+Usage: python scripts/fetch_model.py models/<name>      (e.g. models/cv27_es10)
 
 Files go to data/hf_cache/ (override with ACCENT_MAP_HF_CACHE). Nothing is downloaded
 when the server starts; it only reads this cache.

@@ -8,6 +8,9 @@
                      events from position S to the end, as NDJSON (one JSON object per line).
                      The page asks again from a new S when the listener skips ahead; leaving
                      the request stops that analysis.
+  POST /api/files/{id}/recut
+                     cut the file again with the update interval the machine sustains now
+                     (the page asks when results come too slowly) -> {"id", ...}
   POST /api/analyze  upload + events from the start in one call (handy with curl)
   GET  /             the web page (web/)
 
@@ -30,11 +33,12 @@ import json
 import logging
 import os
 import secrets
+import statistics
 import time
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -47,11 +51,11 @@ from server.file_analysis import FileAnalysis
 from server.model_api import AccentModel, load_model
 from server.pacing import choose_update_interval, measure_inference_ms
 from server.paths import MODELS_DIR, REPO_ROOT
-from server.session import AnalysisSession, Pending, SessionSettings, WindowAnalyzer
+from server.session import AnalysisSession, Event, Pending, SessionSettings, WindowAnalyzer
 
 log = logging.getLogger("uvicorn.error")
 
-DEFAULT_MODEL_DIR = MODELS_DIR / "commonaccent_es6"
+DEFAULT_MODEL_DIR = MODELS_DIR / "cv27_es10"
 WEB_DIR = REPO_ROOT / "web"
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_FILE_SECONDS = 15 * 60
@@ -60,18 +64,43 @@ MAX_CHUNK_SECONDS = 2.0
 MAX_STORED_FILES = 4   # decoded audio kept for /api/files; 15 min is about 58 MB
 
 
+RECENT_RESULTS = 3     # inference times (per full window) that set the interval of new files and sessions
+MIN_WINDOW_SHARE = 0.4  # shorter windows count too, scaled up; below 40 % fixed costs dominate
+
+
 @dataclass
 class Engine:
-    """The loaded model, the update interval chosen for this machine, and the inference thread."""
+    """The loaded model, the update interval chosen for this machine, and the inference thread.
+
+    The interval measured at startup comes from a short burst of work. A laptop under sustained
+    load (a browser playing and drawing, a warm CPU) can be much slower, and results that come
+    slower than the interval fall behind playback. So the engine keeps the last few real
+    inference times, scaled to a full window, and picks the interval of each new file or live
+    session from their median (current_settings). The time grows about in proportion to the
+    window, so the short windows at the start of a file count too (web/logic.js noteRecent uses
+    the same rule). A forced interval (--update-seconds, or no startup measurement) never changes."""
     model: AccentModel
     settings: SessionSettings
     measured_infer_ms: float | None = None
     executor: ThreadPoolExecutor = field(
         default_factory=lambda: ThreadPoolExecutor(max_workers=1, thread_name_prefix="inference"))
+    recent_ms: deque = field(default_factory=lambda: deque(maxlen=RECENT_RESULTS))
 
     async def run(self, fn, *args):
         """Run fn(*args) on the single inference thread."""
         return await asyncio.get_running_loop().run_in_executor(self.executor, fn, *args)
+
+    def note(self, event: Event) -> None:
+        """Remember how long the model took, scaled to a full window."""
+        full = self.settings.window_seconds
+        if event.infer_ms is not None and event.window_seconds >= MIN_WINDOW_SHARE * full - 1e-6:
+            self.recent_ms.append(event.infer_ms * full / event.window_seconds)
+
+    def current_settings(self) -> SessionSettings:
+        if self.measured_infer_ms is None or len(self.recent_ms) < RECENT_RESULTS:
+            return self.settings
+        hop = choose_update_interval(self.model.config.audio.hop_seconds, statistics.median(self.recent_ms))
+        return replace(self.settings, hop_seconds=hop)
 
 
 class FileStore:
@@ -116,7 +145,8 @@ class LiveStream:
 
     def __init__(self, engine: Engine, sample_rate: int):
         self.engine = engine
-        self.session = AnalysisSession(engine.model, engine.settings)
+        self.settings = engine.current_settings()
+        self.session = AnalysisSession(engine.model, self.settings)
         self.resampler = StreamingResampler(sample_rate, engine.model.sample_rate)
         self.latest: tuple[Pending, float] | None = None
         self.dropped = 0
@@ -152,6 +182,7 @@ class LiveStream:
             self.latest = None
             started = time.perf_counter()
             event = await self.engine.run(self.session.analyze, pending)
+            self.engine.note(event)
             yield event, (started - ready) * 1000, (time.perf_counter() - ready) * 1000
 
 
@@ -203,7 +234,9 @@ async def _decode_upload(file: UploadFile, engine: Engine) -> FileAnalysis:
         raise HTTPException(413, f"Audio too long: {duration:.0f} s (max {MAX_FILE_SECONDS} s).")
     if duration < engine.settings.min_audio_seconds:
         raise HTTPException(422, f"Audio too short: {duration:.2f} s (need {engine.settings.min_audio_seconds} s).")
-    return await asyncio.to_thread(FileAnalysis, engine.model, engine.settings, audio)
+    settings = engine.current_settings()
+    log.info("File of %.0f s: one update every %.2f s", duration, settings.hop_seconds)
+    return await asyncio.to_thread(FileAnalysis, engine.model, settings, audio)
 
 
 def _file_events(request: Request, engine: Engine, analysis: FileAnalysis, start: float,
@@ -213,12 +246,13 @@ def _file_events(request: Request, engine: Engine, analysis: FileAnalysis, start
 
     async def lines():
         yield _ndjson({"type": "meta", "start": start, **meta})
-        analyzer = WindowAnalyzer(engine.model, engine.settings)   # fresh smoothing per pass
+        analyzer = WindowAnalyzer(engine.model, analysis.settings)   # fresh smoothing per pass
         count = 0
         for pending in analysis.pendings_from(start):
             if await request.is_disconnected():
                 return
             event = await engine.run(analyzer.analyze, pending)
+            engine.note(event)
             count += 1
             yield _ndjson({"type": "event", **event.to_dict()})
         yield _ndjson({"type": "done", "events": count})
@@ -261,7 +295,7 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
                 "sample_rate": e.model.sample_rate,
                 "window_seconds": s.window_seconds,
                 "target_update_seconds": c.audio.hop_seconds,
-                "update_seconds": s.hop_seconds,
+                "update_seconds": e.current_settings().hop_seconds,
                 "measured_infer_ms": e.measured_infer_ms,
             },
             "session": {k: getattr(s, k) for k in (
@@ -286,7 +320,7 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
     def file_meta(filename: str, analysis: FileAnalysis) -> dict:
         times = analysis.window_times
         return {"filename": filename, "duration": analysis.duration,
-                "update_seconds": app.state.engine.settings.hop_seconds,
+                "update_seconds": analysis.settings.hop_seconds,
                 "first_t": times[0] if times else None, "windows": len(times)}
 
     @app.post("/api/files")
@@ -304,6 +338,24 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
         start = min(max(start, 0.0), analysis.duration)
         return _file_events(request, app.state.engine, analysis, start, file_meta(filename, analysis))
 
+    @app.post("/api/files/{file_id}/recut")
+    async def recut_file(file_id: str) -> dict:
+        """Cut an uploaded file again with the interval this machine sustains now. The page asks
+        when full windows take about as long as the file's interval: results then fall behind
+        playback, and no new pass can fix that. Returns the same id if the interval stays."""
+        entry = store.get(file_id)
+        if entry is None:
+            raise HTTPException(404, "Unknown or expired file. Choose it again.")
+        filename, analysis = entry
+        e = app.state.engine
+        settings = e.current_settings()
+        if settings.hop_seconds == analysis.settings.hop_seconds:
+            return {"id": file_id, **file_meta(filename, analysis)}
+        log.info("Results came too slowly (median %.0f ms per window): %s now updates every %.2f s instead of %.2f s",
+                 statistics.median(e.recent_ms), filename, settings.hop_seconds, analysis.settings.hop_seconds)
+        recut = await asyncio.to_thread(FileAnalysis, e.model, settings, analysis.audio)
+        return {"id": store.add(filename, recut), **file_meta(filename, recut)}
+
     @app.post("/api/analyze")
     async def analyze_file(file: UploadFile, request: Request) -> StreamingResponse:
         analysis = await _decode_upload(file, app.state.engine)
@@ -318,7 +370,7 @@ def create_app(engine: Engine | None = None, model_dir: str | Path | None = None
             sample_rate = _parse_start(await ws.receive())
             stream = LiveStream(e, sample_rate)
             await ws.send_json({"type": "ready", "sample_rate": sample_rate,
-                                "update_seconds": e.settings.hop_seconds})
+                                "update_seconds": stream.settings.hop_seconds})
 
             async def send_events():
                 count = 0

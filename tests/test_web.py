@@ -185,20 +185,29 @@ def test_note_inference_follows_the_longest_window(js):
 # Playback against a simulated server: one inference at a time, `infer` seconds each, and an
 # inference that has started always finishes (its result is dropped if its pass was abandoned).
 # The page part mirrors web/app.js: check on seek and play, and every 0.25 s while playing.
+# Options: `adapt`: the page also asks for a longer interval when results come too slowly, the
+# server answers as pacing.py would (1.2 x the inference time, in steps of 0.25 s), and the page
+# keeps showing the earlier cut's results until new ones are there. `scaled`: inference time
+# grows with the window, as measured (a 2 s window takes a fifth of a full 10 s one).
 SIMULATE = r"""
-function simulate(hop, infer, duration, script, until) {
-  var L = AccentLogic, dt = 0.01;
-  var ends = [];
-  for (var k = 1; k * hop <= duration + 1e-9; k++) ends.push(Math.round(k * hop * 1000) / 1000);
-  if (ends[ends.length - 1] < duration - 1e-9) ends.push(duration);
-  var file = {first_t: ends[0], hop: hop, duration: duration};
+function simulate(hop, infer, duration, script, until, options) {
+  options = options || {};
+  var L = AccentLogic, dt = 0.01, ends, file;
+  function cut(h) {
+    ends = [];
+    for (var k = 1; k * h <= duration + 1e-9; k++) ends.push(Math.round(k * h * 1000) / 1000);
+    if (ends[ends.length - 1] < duration - 1e-9) ends.push(duration);
+    file = {first_t: ends[0], hop: h, duration: duration};
+  }
+  cut(hop);
   var server = {job: null, pass: null};
-  var page = {events: [], stream: null, inference: null, time: 0, playing: false, lastCheck: -1, restarts: 0};
+  var page = {events: [], stream: null, inference: null, recent: [], time: 0, playing: false, lastCheck: -1,
+              restarts: 0, recuts: 0};
   var now = 0, log = [];
   function startIndex(t) { var i = 0; while (i + 1 < ends.length && ends[i + 1] <= t + 1e-9) i++; return i; }
   function view(seeked) {
     return {time: page.time, playing: page.playing, now: now, seeked: seeked,
-            infer: page.inference ? page.inference.seconds : hop / 1.2};
+            infer: page.inference ? page.inference.seconds : file.hop / 1.2};
   }
   function startStream() {
     var p = L.newPass(file, page.stream, view(false), page.events);
@@ -208,6 +217,15 @@ function simulate(hop, infer, duration, script, until) {
     page.restarts++;
   }
   function check(seeked) {
+    if (options.adapt && L.slowerThanPlayback(page.recent, file.hop)) {
+      page.recent = [];
+      var longer = Math.ceil(infer * 1.2 / 0.25 - 1e-9) * 0.25;
+      if (longer > file.hop) {
+        page.previous = {events: page.events, hop: file.hop};
+        cut(longer); page.events = []; page.recuts++; startStream();
+      }
+      return;
+    }
     if (L.needsRestart(page.events, file, page.stream, view(seeked))) startStream();
   }
   for (var step = 0; now < until; step++) {
@@ -223,19 +241,22 @@ function simulate(hop, infer, duration, script, until) {
       var j = server.job;
       server.job = null;
       if (!j.pass.aborted) {
-        var e = {index: j.index, t: ends[j.index], infer_ms: infer * 1000, window_seconds: Math.min(10, ends[j.index])};
+        var e = {index: j.index, t: ends[j.index], infer_ms: j.took * 1000, window_seconds: Math.min(10, ends[j.index])};
         L.insertEvent(page.events, e);
         L.passResult(j.pass.page, e, now);
         page.inference = L.noteInference(page.inference, e);
+        page.recent = L.noteRecent(page.recent, e, 10);
         if (j.pass.next >= ends.length) j.pass.page.done = true;
       }
     }
     if (!server.job && server.pass && !server.pass.aborted && server.pass.next < ends.length) {
-      server.job = {pass: server.pass, index: server.pass.next++, until: now + infer};
+      var took = options.scaled ? infer * Math.min(10, ends[server.pass.next]) / 10 : infer;
+      server.job = {pass: server.pass, index: server.pass.next++, until: now + took, took: took};
     }
     if (page.playing && now - page.lastCheck >= 0.25 - 1e-9) { page.lastCheck = now; check(false); }
-    var shown = L.freshEventAt(page.events, page.time, hop);
-    log.push([now, page.time, shown ? shown.t : null, page.restarts]);
+    var shown = L.freshEventAt(page.events, page.time, file.hop) ||
+      (page.previous ? L.freshEventAt(page.previous.events, page.time, page.previous.hop) : null);
+    log.push([now, page.time, shown ? shown.t : null, page.restarts, page.recuts, file.hop]);
     if (page.playing) page.time = Math.min(page.time + dt, duration);
   }
   return log;
@@ -258,7 +279,7 @@ def test_map_follows_playback_after_skips(hop, infer):
     ctx = quickjs.Context()
     ctx.eval((WEB_DIR / "logic.js").read_text())
     ctx.eval(SIMULATE)
-    log = json.loads(ctx.eval(f"JSON.stringify(simulate({hop}, {infer}, 200, {json.dumps(PLAYBACK)}, 110))"))
+    log = json.loads(ctx.eval(f"JSON.stringify(simulate({hop}, {infer}, 200, {json.dumps(PLAYBACK)}, 110, false))"))
 
     def between(a, b):
         return [row for row in log if a <= row[0] < b - 1e-9]
@@ -282,6 +303,59 @@ def test_map_follows_playback_after_skips(hop, infer):
     assert paused[-1][2] == pytest.approx(120.0 - (120.0 % hop))
     assert next(row[0] for row in paused if row[2] is not None) - 73.0 <= 2 * infer + 0.2
 
+
+
+def gaps(log, after=3.0):
+    """(start, length) of each stretch of playback without a result on the map."""
+    out, start = [], None
+    for now, t, shown, *_ in log:
+        if t > after and shown is None and start is None:
+            start = now
+        if shown is not None and start is not None:
+            out.append((round(start, 2), round(now - start, 2)))
+            start = None
+    return out
+
+
+def simulate_plain_playback(hop, infer, adapt):
+    ctx = quickjs.Context()
+    ctx.eval((WEB_DIR / "logic.js").read_text())
+    ctx.eval(SIMULATE)
+    script = [(0.0, "upload"), (0.3, "play")]
+    options = {"adapt": adapt, "scaled": True}
+    return json.loads(ctx.eval(f"JSON.stringify(simulate({hop}, {infer}, 120, {json.dumps(script)}, 100, {json.dumps(options)}))"))
+
+
+@pytest.mark.parametrize("infer", [2.2, 2.4, 3.0])
+def test_too_slow_a_server_gets_a_longer_interval_once(infer):
+    """What the user saw (2026-11-23): the server needed more than the 1.75 s interval per window,
+    so the map said "Analyzing this part" every 5-9 s. With the recut it happens at most once."""
+    before = gaps(simulate_plain_playback(1.75, infer, adapt=False))
+    assert len(before) >= 5                                         # the reported behaviour
+    log = simulate_plain_playback(1.75, infer, adapt=True)
+    assert log[-1][4] == 1 and log[-1][5] >= 1.2 * infer            # one recut, interval with headroom
+    assert len(gaps(log)) <= 1                                       # at most the one switching over
+    recut_at = next(row[0] for row in log if row[4] == 1)
+    assert not gaps(log, after=log[next(i for i, r in enumerate(log) if r[4] == 1)][1] + 2 * infer + 2 * 1.75 + 1)
+    assert recut_at < 20
+
+
+@pytest.mark.parametrize("hop, infer", [(1.75, 1.5), (2.0, 1.8), (0.5, 0.35)])
+def test_a_fast_enough_server_keeps_its_interval(hop, infer):
+    log = simulate_plain_playback(hop, infer, adapt=True)
+    assert log[-1][4] == 0 and not gaps(log)
+
+
+def test_recent_inference_times(js):
+    full, short = {"infer_ms": 1500, "window_seconds": 10}, {"infer_ms": 300, "window_seconds": 3}
+    half = {"infer_ms": 750, "window_seconds": 5}
+    recent = []
+    for e in (short, full, {"infer_ms": None, "window_seconds": 10}, half, full, {**full, "infer_ms": 2000}):
+        recent = js(f"AccentLogic.noteRecent({json.dumps(recent)}, {json.dumps(e)}, 10)")
+    assert recent == [1.5, 1.5, 2.0]                     # 3 s windows left out, 5 s ones scaled up
+    assert js("AccentLogic.slowerThanPlayback([1.5, 1.5, 2.0], 1.75)") is False      # median 1.5 < 0.95 * 1.75
+    assert js("AccentLogic.slowerThanPlayback([1.7, 1.8, 1.2], 1.75)") is True       # median 1.7 > 1.66
+    assert js("AccentLogic.slowerThanPlayback([3.0, 3.0], 1.75)") is False            # not enough yet
 
 def test_clock(js):
     assert js("[0, 5.9, 65, 600].map(AccentLogic.clock)") == ["0:00", "0:05", "1:05", "10:00"]

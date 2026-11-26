@@ -119,6 +119,24 @@ var AccentLogic = (function () {
     return { window: event.window_seconds, seconds: event.infer_ms / 1000 };
   }
 
+  // The model time (s) per full window, from the last 3 results, newest last. The shorter
+  // windows at the start of a file count too, scaled up: the time grows about in proportion to
+  // the window (measured: 2 s, 4 s, 8 s windows scale to within 7 % of a full 10 s one). Below
+  // 40 % of a full window the fixed costs dominate, so those are left out. app.py does the same.
+  function noteRecent(recent, event, windowSeconds) {
+    if (event.infer_ms == null || event.window_seconds < 0.4 * windowSeconds - 1e-6) return recent;
+    return recent.concat([event.infer_ms / 1000 * windowSeconds / event.window_seconds]).slice(-3);
+  }
+
+  // Do full windows take about as long as the interval between them, or longer? Then results
+  // fall behind playback and no new pass can fix it: the file needs a longer interval (the
+  // server picks one from the same measurements, with 20 % headroom).
+  function slowerThanPlayback(recent, hop) {
+    if (recent.length < 3) return false;
+    var sorted = recent.slice().sort(function (a, b) { return a - b; });
+    return sorted[1] > 0.95 * hop;
+  }
+
   // Seconds until a pass asked for now sends its first result: the rest of the inference the
   // server is running for the current pass, then one more.
   function firstResultDelay(pass, view) {
@@ -262,6 +280,8 @@ var AccentLogic = (function () {
     freshEventAt: freshEventAt,
     analyzedUntil: analyzedUntil,
     noteInference: noteInference,
+    noteRecent: noteRecent,
+    slowerThanPlayback: slowerThanPlayback,
     firstResultDelay: firstResultDelay,
     newPass: newPass,
     passResult: passResult,

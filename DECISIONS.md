@@ -344,3 +344,533 @@ Short notes on each choice and why. Newest at the bottom.
 - **Trade-off:** a pass runs to the end of the file, even over windows already cached. The page
   ignores the duplicates. Stopping earlier would need an end position in the API; not worth it
   yet.
+
+## 2026-11-22: Stage 2, step 1: what Common Voice Spanish contains
+
+- **All work on our own model is on the branch `stage2-own-model`** (the user's wish), not on main.
+- **Data:** Common Voice 27.0 Spanish (`cv-corpus-27.0-2026-09-11-es.tar.gz`, 51.9 GB). The user
+  downloaded it from Mozilla Data Collective, the only source since October 2025, and put it in
+  `data/commonvoice/` (not committed). SHA-256
+  `b7c1f303ebe3c4a637afdd3d31c5aaa3da131a893ce77169db182068f342e4c1`, computed by us. Mozilla
+  showed no checksum to compare it with.
+- **Reading the archive safely:** `scripts/cv_extract.py` reads it in one pass of about 4.5 min.
+  - It computes the checksum and lists all 1,683,749 members.
+  - It extracts only the 11 metadata files: TSV tables and release notes.
+  - Only regular files with safe paths are written. Links, absolute paths and ".." are refused,
+    which a test checks.
+  - Audio is extracted later, and only the clips we need.
+  - Scripts that read the downloaded files run with `python -I`.
+- **Counting:** `scripts/cv_inventory.py` counts only validated clips (440,794 rows). The
+  release's own README counts all 1.68 million clips, including 1.15 million that nobody has
+  validated yet.
+  - A speaker is one `client_id`. A speaker counts for an accent only if every labelled clip
+    names that one accent: 4,328 speakers (296,643 clips).
+  - 69 speakers named several accents (678 clips), and 13,291 named none (143,473 clips).
+  - The inventory prints no speaker ids, and its JSON stays in `data/`.
+- **The 10 regional accents** (validated clips, one-accent speakers):
+
+  | Accent | Speakers | Hours | h, ≤ 50 clips/speaker | Top speaker's share |
+  |---|---|---|---|---|
+  | México | 1,083 | 194.3 | 27.5 | 8 % |
+  | Andino-Pacífico | 693 | 26.3 | 15.3 | 12 % |
+  | España: Norte peninsular | 463 | 57.9 | 11.1 | 47 % |
+  | Caribe | 419 | 15.8 | 8.8 | 14 % |
+  | Rioplatense | 415 | 20.5 | 9.2 | 22 % |
+  | España: Centro-Sur peninsular | 348 | 15.9 | 8.9 | 10 % |
+  | América central | 287 | 10.8 | 6.4 | 9 % |
+  | Chileno | 216 | 8.6 | 4.7 | 15 % |
+  | España: Sur peninsular | 186 | 58.1 | 5.2 | 83 % |
+  | España: Islas Canarias | 167 | 3.9 | 2.5 | 21 % |
+
+  - The 11th option, "Español de Filipinas", has 3 speakers. 42 free-text labels have 1–3
+    speakers each (for example "España: Catalunya").
+- **What this means:**
+  - Every regional accent has enough speakers for a speaker-disjoint test set.
+  - Raw hours are dominated by a few speakers. In southern Spain one speaker made 83 % of the
+    clips, so we must cap clips per speaker.
+  - With a cap of 50, the usable audio is about 100 h, from 2.5 h (Canaries) to 27.5 h (Mexico).
+  - Clips are short: 4.8–5.6 s on average.
+  - Labelled speakers are mostly male (roughly 70 %, where gender is given), so results should
+    also be reported by gender.
+
+## 2026-11-22: Stage 2, step 2: speaker-disjoint split (10 accents)
+
+- **The user's choices:** the 10 regional accents, at most 50 clips per speaker, and validated
+  clips only.
+  - Left out: "Español de Filipinas" (3 speakers), the free-text accents, and speakers who
+    named several accents.
+- **The settings are in `training/cv27_es10/dataset.yaml`** (committed). The spec pins the
+  archive's SHA-256, and `scripts/cv_split.py` refuses to run if the extracted data came from a
+  different archive.
+- **Rules,** for each accent separately:
+  - Test and dev speakers come only from speakers with at least 5 clips (about 25 s), so each
+    can fill at least two 10 s test windows.
+  - Test takes 15 % of those speakers (at least 20), dev 10 % (at least 10). Fractions give
+    the big classes more reliable numbers, and the minimums keep the small ones testable.
+  - Every other speaker trains, and each speaker counts for at most 50 clips.
+  - "Random" means ordered by SHA-256 of a fixed seed and the speaker id (or clip name). The
+    split is the same on every run whatever the row order, which a test checks.
+- **Sentences are kept out of training too.** A training clip whose sentence is also read in dev
+  or test is dropped before the cap.
+  - Without this, a model could score on test by recognizing sentence content instead of the
+    accent.
+  - Cost: 2.8 h of training audio (73.4 h instead of 76.2 h). 175 training speakers read
+    only held-out sentences and drop out entirely.
+  - The script checks that no speaker, and no held-out sentence, is in training.
+- **Result** (speakers / hours):
+
+  | Class | Train | Dev | Test (f/m) |
+  |---|---|---|---|
+  | es_north | 378 / 8.0 | 30 / 1.2 | 46 / 1.5 (9/34) |
+  | es_centre_south | 278 / 6.7 | 25 / 0.8 | 37 / 1.1 (7/29) |
+  | es_south | 145 / 3.8 | 14 / 0.4 | 22 / 0.7 (7/15) |
+  | es_canary | 137 / 1.7 | 10 / 0.2 | 20 / 0.5 (7/12) |
+  | mexico | 850 / 20.5 | 73 / 2.2 | 110 / 4.2 (34/72) |
+  | central_america | 226 / 4.9 | 19 / 0.5 | 28 / 0.8 (12/15) |
+  | caribbean | 336 / 6.3 | 26 / 0.8 | 39 / 1.4 (12/24) |
+  | andean_pacific | 546 / 11.2 | 44 / 1.5 | 66 / 2.2 (16/48) |
+  | rioplatense | 320 / 6.6 | 29 / 0.9 | 43 / 1.4 (14/26) |
+  | chilean | 168 / 3.6 | 15 / 0.4 | 22 / 0.6 (5/15) |
+  | total | 3,384 / 73.4 | 285 / 9.1 | 433 / 14.3 |
+
+  - Test gender: f/m counts only speakers who gave a gender.
+  - Training data is uneven: 20.5 h for Mexico against 1.7 h for the Canaries. Training will
+    need class-balanced sampling or loss weights.
+- **The lists stay in `data/commonvoice/splits/cv27_es10/`** (not committed), because they hold
+  speaker ids. The Common Voice terms forbid sharing the data. The spec plus the script remake
+  them exactly.
+
+## 2026-11-22: Stage 2, step 3: clips, noise collection, training copies
+
+- **Train on the clips as they are, about 5 s each, and use 10 s windows at inference** (the
+  user's wish).
+  - The model averages over time, so the input length is free. The stage-1 model was also
+    trained on single clips.
+  - There are no artificial joins, and twice as many examples.
+  - The risk is a small length mismatch. Evaluation will therefore also use 10 s test windows,
+    made by joining two clips of the same test speaker (for evaluation only), and later the
+    user's own recordings.
+- **The clips:** `scripts/cv_extract.py --clips` made a second pass over the archive (5 min) and
+  extracted the 64,054 clips that the split lists need (2.6 GB).
+  - The archive's checksum is unchanged, and no clip was missing.
+  - `scripts/cv_check_clips.py` decoded all of them in 49 s. Sample rates: 48 kHz (49,469),
+    32 kHz (14,305), 44.1 kHz (280); the decoder resamples to 16 kHz. Lengths match
+    `clip_durations.tsv` within 1 ms.
+- **The noise collection is the user's choice:** OpenSLR 28 "Room Impulse Response and Noise
+  Database".
+  - File: `rirs_noises.zip`, 1.3 GB, Apache 2.0. SHA-256
+    `3b50cfde915b3984738169b4beb341e9f6b8062ae4c2076146c5db71c2c05dc7`, computed by us; the page
+    shows none.
+  - It was unpacked by `scripts/noise_extract.py` (24 s, 3.8 GB) with the same safety rules,
+    plus a limit on the unpacked size.
+  - The noise sounds are public domain (Freesound, via MUSAN). The page doesn't say whether the
+    three sources of the real room recordings (RWCP, REVERB 2014, AIR) have their own terms.
+    We only mix them into training audio and never share them; the README credits all sources.
+- **Training copies** follow `training/cv27_es10/augment.yaml`, pinned to the collection's
+  checksum. In order:
+  - **Room echo** (50 % of clips): half real rooms (325, first channel), half simulated small
+    and medium rooms (40,000). Large halls of 30–50 m are left out as unlike laptop use. The
+    echo is aligned on its direct sound, and the level is kept.
+  - **Noise** (60 %): room noise (92), background sounds (37) or foreground sounds (789), at
+    5–20 dB below the speech. The speech level counts only loud 20 ms frames, so leading
+    silence doesn't make the noise weaker than intended.
+    - The 17 sounds under 0.5 s (down to 26 ms) are left out, because repeated they would
+      buzz.
+  - **Laptop microphone:** high-pass at 80–300 Hz (50 %) and low-pass at 3.5–7 kHz (30 %).
+  - **Volume:** ±6 dB, then limited to 0.99.
+  - Every choice comes from a SHA-256 of the seed and the clip name, so a clip always gets the
+    same copy. About 7 % of copies end up untouched.
+  - Dev and test stay clean.
+- **Checked:**
+  - Tests for: the list files; unsafe paths; fixed plans and the probabilities over 3,000
+    clips; the SNR (within 0.3 dB, with leading silence); echo alignment and level; the filters
+    (over 95 % kept in the passband, under 5 % in the stopband); and limiting.
+  - The real collection loads, with nothing missing, everything at 16 kHz.
+  - `scripts/augment_preview.py` wrote one clean and one augmented clip per class for the user
+    to listen to.
+
+## 2026-11-22: Stage 2, step 4, part A: base-model features, prepared for a Kaggle GPU
+
+- **Approach A,** as recommended: keep the base model frozen and train only a small classifier
+  later.
+  - The base model is `facebook/wav2vec2-large-xlsr-53` at the pinned revision, with the
+    SHA-256 of its 3 files in `training/cv27_es10/features.yaml`. Loading is strict: no
+    missing weights; 7 pre-training weights are unused.
+  - The stage-1 model's fine-tuned encoder is not used. It was trained on Common Voice 11
+    without a speaker split, so it may have heard our test speakers.
+- **What is stored per piece of audio:** for each of the 25 hidden states, the mean and the
+  standard deviation over time. That is float16, (25, 2048), 100 KB.
+  - Input is normalized to zero mean and unit variance, as the model's preprocessor config
+    says. A test checks this against transformers' own function.
+  - **Layers 22 and 23 reach about 38,000** before the final layer norm (seen on 20 test clips),
+    close to float16's maximum of 65,504. They are stored divided by 256, which is exact, and
+    any value that would still overflow is an error, never inf.
+- **Items:** 119,980 in total.
+
+  | Set | Items |
+  |---|---|
+  | train | 48,117 |
+  | train_aug (the noisy copy of each training clip) | 48,117 |
+  | dev | 6,180 |
+  | test | 9,757 |
+  | dev_pairs | 3,027 |
+  | test_pairs | 4,782 |
+
+  - The pairs join two clips of the same speaker into about 10 s, for evaluating at the app's
+    window length.
+  - This comes to about 12 GB of features.
+- **Why Kaggle:** this CPU processes 4.1 s of audio per second, so all items would take about
+  45 h. A GPU should take 1–2 h; that's an estimate.
+  - The user chose to upload only the 64,054 clips we use (2.6 GB) as a **private** Kaggle
+    dataset. Common Voice is CC0, but Mozilla asks that copies not be hosted elsewhere, so
+    speakers who withdraw can be removed. The user decides whether to delete the dataset after
+    the run.
+  - Nothing personal goes up: no speaker ids, accents or genders. The upload table has only
+    item ids, sets and clip file names. Accents, speakers and genders stay in
+    `data/kaggle/cv27_es10/local/items_local.tsv`.
+- **The bundle** (`scripts/kaggle_bundle.py build`): one `bundle.tar`, 4.08 GB, SHA-256
+  `bc376a363dec2450057a479f39c8b0de583012e0d07e3e31087e10663b01cd07`.
+  - Contents: the clips, the noise zip, the item table, the three settings files, the code,
+    the pinned library list, and reference results for 48 items (8 per set, including noisy
+    copies and pairs) computed on this CPU.
+  - Plus `files.sha256` for all 64,073 files.
+  - Before building, the script checks the Common Voice archive, the noise zip and the base
+    model against their pinned checksums.
+  - The 13 code and settings files inside were checked to be byte-identical to commit
+    `b832955`. The manifest's "dirty" flag was set, for an unknown reason.
+- **On Kaggle** (`scripts/kaggle_run.py`, copied there as `run.py`), each step is checked
+  before the next:
+  1. The tar's checksum; it is unpacked safely (only regular files under `bundle/`) and every
+     file's checksum is checked. A bundle that Kaggle has already unpacked also works.
+  2. The pinned libraries are installed. Kaggle's own torch, numpy and scipy stay, and their
+     versions are logged.
+  3. The base model is downloaded at its revision and its checksums are checked.
+  4. The noise collection is checked and unpacked, without the unused large halls.
+  5. **The 48 reference items must match the laptop:** cosine ≥ 0.9999 and relative difference
+     ≤ 2 %. Otherwise it stops before the full run.
+  6. One process per GPU. TF32 is off, so newer GPUs compute in full float32 like the CPU.
+  7. `summary.json` with the versions and the checksum of every output file.
+- **Dry run on the laptop:** the bundle was unpacked, all 64,073 files were checked, and the job
+  ran from the bundle's own copy of the code. Its results for all 48 reference items were
+  identical to the reference. So the bundle doesn't depend on anything else in the repo.
+- **Bugs found by the tests before any real run:**
+  - `Path.with_suffix` read ".part0of2" as a file extension, so two GPUs would have written to
+    the same file.
+  - Item numbering was quadratic, far too slow for 120,000 items.
+- **Incident:** running `uv sync` in the repo emptied `.venv`.
+  - uv read `pyproject.toml` (tool settings only) as a project without dependencies and
+    removed every package.
+  - Reinstalled with the README's commands (with the user's OK); the installed set matches the
+    pinned files exactly. All 274 fast and 4 real-model tests pass again.
+  - `pyproject.toml` now has `[tool.uv] managed = false`. A test in a throwaway folder
+    confirmed that `uv run` then keeps the packages.
+  - An explicit `uv sync` still removes them, and uv has no setting against that. The README's
+    troubleshooting section now says so and gives the fix. `uv.lock` is ignored.
+
+## 2026-11-22: Stage 2, step 4: first Kaggle run stopped by its own check; fixed
+
+- The upload worked: the private dataset `shawnsker/accent-map-cv27-es10` is ready. The first
+  run of `shawnsker/accent-map-features-cv27-es10` stopped after 3 minutes with "bundle files
+  differ from files.sha256", before any GPU work.
+- **Cause: Kaggle unpacks uploaded archives,** both `bundle.tar` and the noise zip inside it,
+  which became a folder `noise/rirs_noises/`. `run.py` expected the tar case to be possible,
+  but not the inner zip.
+- **Fix, without uploading again** (only `run.py` changes; pushing it is free):
+  - **Unpacked archives:** an archive Kaggle unpacked is checked as a whole, by one SHA-256
+    over the sorted list of its files' checksums. `scripts/kaggle_bundle.py meta` computes
+    that from the pinned zip (61,273 files) and writes it into the job's `run.py`, using
+    run.py's own function, so both sides compute it the same way. A changed noise file is
+    detected (tested).
+  - **Read-only input:** `/kaggle/input` is read-only, so the job reads the bundle through a
+    folder of links in `/tmp/work`.
+  - **Faster search:** the bundle is looked for at most 4 folders deep. The full search of
+    `/kaggle/input` had taken 3 minutes of GPU time.
+- **Rehearsal:** the real `bundle.tar` was unpacked as Kaggle does it, including the inner zip,
+  and the folder was made read-only. Then the job's own steps ran here on the CPU:
+  - all 64,073 files were checked in 60 s
+  - the reference check gave results identical to the reference for all 48 items
+
+## 2026-11-23: Stage 2, step 4 done: features computed on Kaggle, downloaded and checked
+
+- **Second run worked.** It waited about 3¾ h in Kaggle's queue, then ran for 5 h on two T4s.
+  All 119,980 items were done, with about 55 s of audio per second per GPU.
+  - Kaggle's reference check, with GPU results against the laptop's on 48 items: lowest cosine
+    0.9999998, largest relative difference 0.08 % (limits 0.9999 and 2 %).
+  - "GPU will not be used" in the log comes from TensorFlow, which Kaggle loads by default; our
+    code ran on CUDA. The pip conflict warnings are about packages we don't use.
+- **Where the time went:** checking the 64,073 bundle files took 3 h 9 min on Kaggle but 60 s on
+  the laptop. The extraction then read the same clips quickly, so the time was most likely
+  Kaggle's first fetch of many small files from its dataset storage, not the hashing.
+  - The extraction itself took 110 min. The job used about 5 of the 30 GPU hours.
+  - **For a future run:** upload the data as one large file that Kaggle doesn't unpack.
+- **Download:** `kaggle kernels output` put the 12 GB into a `features/` subfolder at about
+  10 MB/s. The files were moved to `data/features/cv27_es10/` (not committed); the job log is in
+  `data/kaggle/cv27_es10/run_logs/attempt2/`.
+- **Check before use** (`scripts/check_features.py`, 13 tests): checksums against
+  `summary.json`, same bundle, every item exactly once in the part and order `extract_job` uses,
+  all rows written, none all zeros, all values finite. It also compares 48 rows of the full run
+  with the laptop's reference results.
+  - That last check matters because Kaggle's reference check used a separate small run, so it
+    could not catch rows stored next to the wrong ids.
+  - Result: OK in 44 s, with the same closeness as on Kaggle. Largest stored value 319.5
+    (layer 21), far below the float16 limit of 65,504, so the scaling of layers 22 and 23 left
+    plenty of room.
+  - The check writes `verified.json`; training will read only features that have it.
+- The private Kaggle dataset (4 GB) is no longer needed. Deleting it is the user's call.
+
+## 2026-11-23: Stage 2, step 5a: which layers carry the accent
+
+- **Reading the features:** `src/training/feature_store.py` reads only folders with
+  `verified.json` and undoes the storage scaling of layers 22 and 23.
+  - Test and test_pairs open only with an explicit flag, which the training and tuning code
+    never passes. The test speakers stay unseen until the final evaluation.
+- **Training reads blocks of rows in order.** This disk reads about 250 MB/s in order but only
+  33–97 MB/s at random, and only about 3 GB of RAM is free (WSL has 6.7 GB).
+  - Rows are sorted by speaker hash, so a block of 2,000 rows holds about 140 speakers from
+    every class. Blocks come in random order and are shuffled inside.
+- **Main measure: balanced accuracy by speaker** (`src/training/metrics.py`).
+  - Per class, each speaker's share of correct answers is averaged over the speakers; then the
+    classes are averaged. A speaker with 50 clips counts as much as one with 5, and the Canaries
+    as much as Mexico.
+  - 95 % intervals come from resampling speakers within each class, because clips of one
+    speaker are not independent.
+  - Also reported: clip accuracy, log loss, calibration error, the confusion table, and results
+    by gender (f, m, other/not given).
+- **Probe** (`scripts/train_probe.py`): one linear classifier per layer, all trained together
+  for 4 epochs on the clean training clips. Inputs are standardized per layer and dimension;
+  the loss weights the classes equally. Run time 2¼ min, 3.6 GB RAM at most.
+- **Result** (dev pairs, about 10 s; chance is 10 %):
+  - The accent is in the middle layers: layers 7–18 reach 41–46 %, with layer 17 highest
+    (45.6 %, interval 40.6–50.3 %). Dev clips (about 5 s) score 2–4 points lower.
+  - Early layers are lower (layer 0: 22 %), and so is the last one (layer 24: 25 %).
+  - **Layers 22 and 23 are almost useless (14 %).** These are the layers with values of about
+    38,000.
+    - Checked: their statistics match an exact computation, with no tiny spreads and no extreme
+      standardized values.
+    - Scaling can't be the cause: a standardized probe ignores any factor on a whole layer.
+    - GPU and laptop agreed on every layer.
+    - So this is how XLSR-53's own last layers behave, not an error of ours.
+  - These are lower bounds from a quick linear probe. They only decide which layers the
+    classifier uses.
+
+## 2026-11-23: Stage 2, step 5b: layers and classifier chosen on dev
+
+- **Inputs written once** (`build_inputs`): for each candidate layer set, the chosen layers
+  standardized and averaged into one vector of 2,048 numbers per item.
+  - Candidates, from the probe's dev-pair scores: layer 17, windows of 3, 5 and 9 layers around
+    it, every layer within 5 points of the best (7–18), and all 25 layers.
+  - One pass per set: 34 s each for train and train_aug. The result is 2.5 GB in
+    `data/runs/cv27_es10/inputs/`, so each trial takes seconds instead of 40 s of reading.
+- **Training always uses the clean and the noisy copies.** Dev is clean audio, so it can't
+  judge the noisy copies, which are there for laptop microphones.
+- **Loss and stopping:** the loss weights the classes equally. Training keeps the epoch with the
+  best speaker-balanced accuracy on the dev pairs (the app's 10 s window), and stops 5 epochs
+  after it.
+- **Results** (dev pairs; dev clips in brackets; chance 10 %):
+
+  | Linear classifier on | Dev pairs |
+  |---|---|
+  | layer 17 | 48.0 % (43.3 %) |
+  | layers 16–18 | 47.8 % (42.5 %) |
+  | layers 7–18 | 46.5 % (42.4 %) |
+  | layers 15–19 | 45.5 % (41.7 %) |
+  | all 25 layers | 45.1 % (42.1 %) |
+  | layers 13–21 | 44.9 % (40.8 %) |
+
+  | Classifier on layer 17 | Dev pairs |
+  |---|---|
+  | **linear, weight decay 0.1 (chosen)** | **49.2 % (44.0 %)** |
+  | linear, weight decay 0.001 | 48.0 % (43.3 %) |
+  | hidden layer 512, dropout 0.3 | 46.3 % (41.4 %) |
+  | hidden layer 512, dropout 0.5 | 44.6 % (42.2 %) |
+  | hidden layer 1024, dropout 0.5 | 44.4 % (41.2 %) |
+
+- **What this says:**
+  - The differences are within noise. With 285 dev speakers, each number is about ±5 points.
+  - The larger classifiers don't help: they peak early and then fit the training speakers. The
+    limit is most likely the 3,384 training speakers, not the classifier's size.
+  - The simplest option won, and it is also the cheapest to run.
+  - 10 s pairs score about 5 points above single clips, which supports the 10 s inference
+    window.
+- **Saved classifier:** `data/runs/cv27_es10/head.pt`, 118 KB. It holds the class list, layer 17's
+  mean and spread, and the weights.
+  - It isn't committed yet. Where the app's model files live is part of plugging the model into
+    the app.
+- **Run time:** about 10 min of computing; peak memory 3.8 GB.
+
+## 2026-11-23: Stage 2, step 5c: calibrated on dev, evaluated once on test
+
+- **Temperature 1.37,** fitted on the dev pairs (`scripts/evaluate_head.py`) and saved into
+  `head.pt`. It changes no answer, only how sure the model claims to be.
+  - The untempered model was overconfident.
+  - Calibration error on the test pairs: 0.118 before, 0.029 after.
+  - This matters because the app shows probabilities and has an "uncertain" state.
+- **Test was evaluated once** (433 speakers no step had seen). The script refuses a second run
+  unless given `--again`, which needs a reason recorded here.
+- **Results** (balanced accuracy by speaker, 95 % interval; chance 10 %):
+
+  | Set | Balanced accuracy | Clip accuracy |
+  |---|---|---|
+  | test pairs (~10 s, like the app) | **48.3 % (44.4–52.3 %)** | 49.2 % |
+  | test clips (~5 s) | 43.9 % (40.7–47.0 %) | 47.1 % |
+  | dev pairs (chose the settings) | 49.2 % (44.8–53.5 %) | 47.9 % |
+
+  - Test matches dev, so choosing on dev did not flatter the numbers.
+- **Per class** (test pairs): rioplatense 66 %, chilean 61 %, canary 60 %, central_america
+  53 %, es_centre_south 51 %, mexico 49 %, caribbean 41 %, andean_pacific 38 %, es_south 33 %,
+  es_north 29 %.
+- **Mistakes are mostly between neighbours:**
+  - Spain vs. the Americas is right for 92.4 % of test pairs.
+  - Northern Spain is called central more often than northern (47 % vs. 26 %), and southern
+    Spain is often called central (31 %).
+  - In the Americas, the Caribbean, Andean and Central American accents mix: 20–26 % of each
+    goes to the others.
+  - Mexico and Central America swap 15–18 %.
+  - Rioplatense and Chilean stand out most.
+- **By gender** (test pairs): female 46.4 % (123 speakers), male 48.3 % (290). The difference
+  is within noise. Other or not given: 54 %, but only 20 speakers.
+- **Not comparable with the stage-1 model's 68.5 %.** That figure is for 6 classes, as plain
+  accuracy, on a split that didn't keep speakers apart.
+- These numbers are for read Common Voice speech. The real check is the user's own recordings
+  (`data/own_tests/`, evaluation only), once the model is in the app.
+
+## 2026-11-23: Stage 2, step 6: the 10-zone model in the app
+
+- **New backend `xlsr_pooled_head`,** added to the existing list. The plug-in design is
+  unchanged: the app reads only `models/cv27_es10/config.yaml`.
+  - The base model XLSR-53 is pinned by revision, as in stage 1.
+  - The classifier is `head.safetensors` (116 KB, committed), pinned by its SHA-256 in
+    config.yaml and refused if it differs.
+  - The class order is read from the file's header and mapped to the config by label.
+- **Safetensors, not the training `.pt` file.** Loading safetensors cannot run code. The header
+  holds the class ids, the layer, the temperature, the storage scaling and the origin (git
+  commit, test result).
+- **The base model stops after layer 17:** 17 of 24 transformer layers.
+  - In XLSR-53, only the very last hidden state passes through the encoder's final layer norm.
+    So after cutting, that norm is replaced by "do nothing"; otherwise layer 17 would change.
+  - A test proves the cut model gives the full model's values. A control shows that cutting
+    without removing the norm doesn't.
+- **Same computation as in training:** the app reuses the training code for the features
+  (`FeatureExtractor`, including the float16 step) and for the classifier.
+  - Checked with the real model on 12 dev clips: from raw audio, the app gives the
+    evaluation's probabilities (which came from the GPU's stored features) within 0.002.
+- **Speed and memory** (8 threads, 10 s window): 1.35 s per update (stage 1: 1.66 s) and 1.5 GB
+  RAM (stage 1: 2.65 GB). The server then updates every 1.75 s.
+  - The gain is less than the 30 % fewer layers suggest, because the convolutional front end
+    always runs in full.
+- **Map:**
+  - New zones for northern and central Spain, the Canaries and Central America, following the
+    Common Voice labels.
+  - The provinces of Guadalajara and Cuenca are northern, as that label says, although they
+    belong to Castilla-La Mancha.
+  - Galicia, Catalonia, Valencia, the Balearic Islands, Ceuta and Melilla have no accent in
+    Common Voice; they stay greyed out as "not covered".
+  - The Canaries got their own map panel.
+  - The zone tests now run for both models, with 19 more test cities.
+- **The "confident" thresholds** (top zone ≥ 50 % and ≥ 15 points ahead) are unchanged.
+  - On the dev pairs: confident on 43 % of windows, right 63 % of the time then and 37 % otherwise.
+  - So the state means something with 10 classes too. Nothing was tuned on it.
+- **End to end:** the server ran with the new model, and two sample clips were streamed through
+  the live connection.
+  - The Mexico clip came out as Mexico (73–85 %, confident).
+  - The Spain clip came out as southern Spain (41–49 %, uncertain; stage 1 also said southern
+    Spain). The delay from speech to map was 0.6–0.9 s.
+- **Other changes:** `bench_latency.py` takes its timing speech from the stage-1 sample clips
+  for any model. The helper for pinned Hugging Face files moved to `server/backends/hf_files.py`,
+  so the new backend doesn't load SpeechBrain.
+- **Default model:** `scripts/serve.py` still starts the stage-1 model; the new one is
+  `--model models/cv27_es10`. Switching the default waits for the user's own test.
+
+## 2026-11-23: File mode: the update interval follows the computer's real speed
+
+- **Bug the user found:** with the 10-zone model, "Analyzing this part…" came back every
+  5–7 s while a file played, without any skipping.
+- **Cause:**
+  - At startup the user's server timed 1.40 s per 10 s window and chose an update every 1.75 s.
+  - During playback each window took longer than that. The simulation reproduces the symptom
+    at 2.2–3 s per window.
+  - File mode assumes each result takes less than one interval. When it doesn't, results fall
+    behind; the page keeps starting a pass further ahead, and each restart leaves a gap of
+    about 3 s.
+  - Why slower: the startup timing is a short burst. Under sustained load it is slower even on a
+    quiet machine (1.5 s instead of 1.34–1.40 s), and the browser and Windows programs share the
+    CPU with WSL.
+  - Stage 1 had the same weakness, just with a bit more slack on this machine.
+- **Fix, without touching how passes start and stop (step B):**
+  - **The server keeps timing the model** (`Engine.note`). Each new file and live session gets
+    its interval from the median of the last 3 times (`current_settings`, 1.2× headroom, as at
+    startup).
+    - Times are scaled to a full window, so the short windows at the start of a file count too.
+      In a quiet measurement 4–8 s windows scaled to within 7 % of a full one; below 40 % of a
+      window, fixed costs dominate, so those don't count.
+    - Under heavy load the short windows are relatively slower (4 s scaled to 8.2 s against 4.7 s
+      for full windows). The first choice can then be too long, which errs toward fewer updates,
+      not toward gaps.
+  - **New `POST /api/files/{id}/recut`:** cuts the same audio again with the current interval.
+    It returns the same id if nothing would change.
+  - **The page asks for a recut** when the median of its last 3 times exceeds 95 % of the file's
+    interval (`logic.js slowerThanPlayback`). Then it continues from the playhead.
+    - It keeps showing the earlier cut's results until the new ones arrive. Those results are
+      still correct for their stretch of audio.
+    - If the server keeps the interval, the page asks again only after 3 new results.
+  - A forced interval (`--update-seconds`) never changes. The server logs each file's interval
+    and each change.
+- **Checked:**
+  - **Simulation** (each window's time grows with its length, as measured; the server cut at
+    1.75 s):
+
+    | Time per window | Before (map gaps) | Now |
+    |---|---|---|
+    | 1.5 s | none | no change |
+    | 1.7 s | none | recut to 2.25 s at 4 s into playback, no gaps |
+    | 2.2–3.0 s | ~3 s gaps every 5–9 s for the whole file | one recut at 5.5–8 s, then one gap of 0.2–4 s |
+    | 4.0 s (extreme) | same, worse | two gaps |
+
+  - **Real server:** a file was streamed while 12 busy processes loaded the CPU. Windows took
+    about 4.7 s instead of 1.5 s, and the recut gave the file 5.75 s instead of 2.0 s, with log
+    lines saying why.
+  - New tests: the interval choice (scaling, too-short windows, getting faster again, forced
+    intervals), the recut endpoint, live sessions, the page helpers, and the simulation. All
+    392 fast tests pass.
+
+## 2026-11-23: Project wrap-up
+
+The user may stop here, so the repo was left as if the project ends.
+
+- **README rewritten as the final document:**
+  - quick start
+  - use and speed
+  - both models compared, with honest numbers and where each comes from (dev or test)
+  - how the 10-zone model was made, with every command to reproduce it
+  - what could come next, troubleshooting, development, credits
+- **The 10-zone model is now the default** (`scripts/serve.py` without `--model`). The user
+  tested it in the browser (map, file mode).
+  - It covers all zones and was evaluated on speakers it had never heard.
+  - It is faster and needs half the memory.
+  - The 6-zone model stays available with `--model models/commonaccent_es6`.
+- `scripts/check_model.py` works with any model; without files it uses the stage-1 sample clips.
+- **Where things are:**
+  - Everything is on branch `stage2-own-model`; `main` has stage 1 only (the 6-zone model,
+    10 s window, file mode following the playhead).
+  - Merging and pushing are the user's decision. Pushing publishes the classifier
+    `models/cv27_es10/head.safetensors`. It holds only trained weights and aggregate statistics,
+    with no audio and no speaker information.
+- **Not committed, on the user's computer** (`data/`, about 77 GB):
+
+  | What | Size | Needed for |
+  |---|---|---|
+  | Common Voice archive and extracted clips | 52 GB | retraining |
+  | features | 12 GB | retraining the classifier |
+  | noise collection | 4.8 GB | retraining |
+  | Kaggle bundle | 3.9 GB | another Kaggle run |
+  | classifier inputs and runs | 2.5 GB | retraining |
+  | Hugging Face models | 2.4 GB | running the app |
+
+  - Also `.venv-old`, the original Python 3.10 environment from before stage 1.
+  - Deleting is the user's decision. The private Kaggle dataset `shawnsker/accent-map-cv27-es10`
+    (4 GB) also still exists.
+- **Open ends** (README, "What could come next"):
+  - Evaluation on the user's own recordings was never done; `data/own_tests/` was never filled.
+  - Ideas for accuracy, with rough gains: fine-tuning XLSR-53 (+6 to +12 points), a classifier
+    that attends over time (+3 to +6), a whole-recording verdict (+4 to +6, measured on dev),
+    more speakers (+1 to +2).

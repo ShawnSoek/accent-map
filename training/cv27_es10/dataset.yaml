@@ -1,0 +1,40 @@
+# Training data for our own 10-accent Spanish model (stage 2), from Common Voice 27.0.
+# Read by scripts/cv_split.py. The data itself stays in data/commonvoice/ (not committed).
+# Choices and reasons: DECISIONS.md, "Stage 2".
+
+release: cv-corpus-27.0-2026-09-11-es
+archive_sha256: b7c1f303ebe3c4a637afdd3d31c5aaa3da131a893ce77169db182068f342e4c1
+source: commonvoice            # the only source so far; a future source is held out as a whole
+
+# Only validated clips (validated.tsv), from speakers whose labelled clips all name one accent.
+max_clips_per_speaker: 50      # chosen at random per speaker, in every split
+
+split:
+  seed: "2026-11-22"
+  eligible_min_clips: 5        # dev and test speakers need at least this many clips (~25 s)
+  test: {fraction: 0.15, min_speakers: 20}   # of the eligible speakers of each accent
+  dev: {fraction: 0.10, min_speakers: 10}
+  drop_train_clips_with_dev_test_sentences: true
+
+# Class ids match models/commonaccent_es6 where the zone is the same.
+classes:
+  - id: es_north
+    accent: "España: Norte peninsular (Asturias, Castilla y León, Cantabria, País Vasco, Navarra, Aragón, La Rioja, Guadalajara, Cuenca)"
+  - id: es_centre_south
+    accent: "España: Centro-Sur peninsular (Madrid, Toledo, Castilla-La Mancha)"
+  - id: es_south
+    accent: "España: Sur peninsular (Andalucia, Extremadura, Murcia)"
+  - id: es_canary
+    accent: "España: Islas Canarias"
+  - id: mexico
+    accent: "México"
+  - id: central_america
+    accent: "América central"
+  - id: caribbean
+    accent: "Caribe: Cuba, Venezuela, Puerto Rico, República Dominicana, Panamá, Colombia caribeña, México caribeño, Costa del golfo de México"
+  - id: andean_pacific
+    accent: "Andino-Pacífico: Colombia, Perú, Ecuador, oeste de Bolivia y Venezuela andina"
+  - id: rioplatense
+    accent: "Rioplatense: Argentina, Uruguay, este de Bolivia, Paraguay"
+  - id: chilean
+    accent: "Chileno: Chile, Cuyo"
